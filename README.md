@@ -144,6 +144,19 @@ The configuration lives in a JSON file (default: `mock_endpoints.json`). Example
 
   All configured endpoints will then be available under `http://host:port`.
 
+### CLI flags & environment variables
+
+| Flag / Env                         | Description                                                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `--config`, `API_FAKER_CONFIG`     | Path to the JSON file with your routes (defaults to `mock_endpoints.json`).                             |
+| `--host`, `API_FAKER_HOST`         | Override the bind host (`127.0.0.1` fallback).                                                          |
+| `-p/--port`, `API_FAKER_PORT`      | Preferred port (`8080` fallback). If the port is occupied, API Faker auto-increments until it succeeds. |
+| `--port-max`, `API_FAKER_PORT_MAX` | Highest port that the fallback logic may probe (default `65535`).                                       |
+| `--log-level`, `API_FAKER_LOG`     | Override tracing verbosity for both API Faker and Axum (`error`, `warn`, `info`, `debug`, `trace`).     |
+| `--dry-run`                        | Validate the configuration file and exit without binding a socket.                                      |
+
+Example: `cargo run -- --config qa.json --host 0.0.0.0 --port 5000 --port-max 5100 --log-level debug` will bind to the first free port in `[5000, 5100]` and emit verbose diagnostics. Pair `--dry-run` with CI to ensure configuration changes stay valid without spinning up the server.
+
 ### Custom configuration
 
   1. Copy `mock_endpoints.example.json` to `mock_endpoints.json` and adjust the routes.
