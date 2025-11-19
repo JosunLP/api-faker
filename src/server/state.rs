@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tracing::warn;
 
-use crate::config::{Config, RouteConfig};
+use crate::config::Config;
 use crate::runtime::{RouteRuntime, VariantSource};
 
 use super::openapi::OpenApiBuilder;
@@ -163,7 +163,7 @@ impl Serialize for RouteSummariesResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{RouteVariantConfig, ServerConfig};
+    use crate::config::{RouteConfig, RouteVariantConfig, ServerConfig};
     use axum::http::Method;
     use serde_json::json;
     use std::collections::BTreeSet;

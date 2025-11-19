@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use axum::body::Bytes;
@@ -275,6 +271,7 @@ mod tests {
     use super::*;
     use axum::http::Method;
     use serde_json::json;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn base_route() -> RouteConfig {
         RouteConfig {
