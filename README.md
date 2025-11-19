@@ -14,6 +14,7 @@ API Faker is a lightweight Rust application that serves HTTP endpoints from a JS
 - Permissive CORS configuration so local browsers can call the mock API without extra setup
 - Host and port can be configured via CLI flags or directly inside the JSON file
 - Request and response flags help you toggle variants and label responses without touching headers manually
+- Built-in placeholder responses for `/robots.txt` and `/favicon.ico` keep browser requests from cluttering the logs
 
 ## Configuration file
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header::CONTENT_TYPE};
 use axum::response::{Html, IntoResponse, Response};
 use serde_json::json;
 use tokio::time::sleep;
@@ -16,6 +16,9 @@ use super::extractors::{
     attach_response_flags, extract_error_trigger, extract_request_flags, parse_query_map,
 };
 use super::state::{RouteKey, RouteSummariesResponse};
+
+const ROBOTS_TXT: &str = "User-agent: *\nDisallow:\n";
+const FAVICON_BYTES: &[u8] = include_bytes!("../../assets/favicon.ico");
 
 const SWAGGER_UI_HTML: &str = r#"<!DOCTYPE html>
 <html lang="en">
@@ -64,6 +67,38 @@ pub async fn openapi_spec(State(state): State<AppState>) -> Response {
 
 pub async fn swagger_ui(State(state): State<AppState>) -> Response {
     let mut response = Html(SWAGGER_UI_HTML).into_response();
+    attach_response_flags(&mut response, &state.default_response_flags);
+    response
+}
+
+pub async fn robots_txt(State(state): State<AppState>) -> Response {
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(Body::from(ROBOTS_TXT))
+        .unwrap_or_else(|error| {
+            warn!(?error, "Failed to build robots.txt response");
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from("robots error"))
+                .expect("valid response")
+        });
+    attach_response_flags(&mut response, &state.default_response_flags);
+    response
+}
+
+pub async fn favicon(State(state): State<AppState>) -> Response {
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "image/x-icon")
+        .body(Body::from(FAVICON_BYTES))
+        .unwrap_or_else(|error| {
+            warn!(?error, "Failed to build favicon response");
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from("favicon error"))
+                .expect("valid response")
+        });
     attach_response_flags(&mut response, &state.default_response_flags);
     response
 }
@@ -144,6 +179,7 @@ mod tests {
         Config, RouteConfig, RouteErrorVariantConfig, RouteVariantConfig, ServerConfig,
     };
     use axum::http::Method;
+    use http_body_util::BodyExt;
     use serde_json::json;
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -260,5 +296,65 @@ mod tests {
             .to_str()
             .expect("header str");
         assert_eq!(default_header, "global, route");
+    }
+
+    #[tokio::test]
+    async fn robots_txt_returns_static_file() {
+        let config = Config {
+            server: ServerConfig::default(),
+            response_flags: vec!["docs".into()],
+            routes: Vec::new(),
+        };
+        let state = AppState::try_from(config).expect("state");
+
+        let response = robots_txt(State(state)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .expect("content type")
+                .to_str()
+                .expect("header"),
+            "text/plain; charset=utf-8"
+        );
+
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body bytes")
+            .to_bytes();
+        assert_eq!(bytes.as_ref(), ROBOTS_TXT.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn favicon_returns_placeholder_icon() {
+        let config = Config {
+            server: ServerConfig::default(),
+            response_flags: Vec::new(),
+            routes: Vec::new(),
+        };
+        let state = AppState::try_from(config).expect("state");
+
+        let response = favicon(State(state)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .expect("content type")
+                .to_str()
+                .expect("header"),
+            "image/x-icon"
+        );
+
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body bytes")
+            .to_bytes();
+        assert_eq!(bytes.as_ref(), FAVICON_BYTES);
     }
 }
