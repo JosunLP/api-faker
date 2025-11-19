@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use anyhow::{Context, Result, bail};
 use axum::body::Bytes;
 use axum::http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE};
-use serde_json;
 
 use crate::config::{RouteConfig, RouteErrorVariantConfig, RouteVariantConfig};
 
@@ -146,10 +145,10 @@ impl RouteRuntime {
             BodySpec::None => (None, None),
         };
 
-        if body_bytes.is_some() && !has_content_type {
-            if let Some(default) = default_ct {
-                headers.push((CONTENT_TYPE, HeaderValue::from_static(default)));
-            }
+        if body_bytes.is_some() && !has_content_type
+            && let Some(default) = default_ct
+        {
+            headers.push((CONTENT_TYPE, HeaderValue::from_static(default)));
         }
 
         let delay = match source {
@@ -307,7 +306,7 @@ mod tests {
             runtime
                 .headers()
                 .iter()
-                .any(|(name, value)| name == &CONTENT_TYPE && value == "text/plain; charset=utf-8")
+                .any(|(name, value)| name == CONTENT_TYPE && value == "text/plain; charset=utf-8")
         );
     }
 
@@ -334,7 +333,7 @@ mod tests {
             runtime
                 .headers()
                 .iter()
-                .any(|(name, value)| name == &CONTENT_TYPE && value == "text/plain; charset=utf-8")
+                .any(|(name, value)| name == CONTENT_TYPE && value == "text/plain; charset=utf-8")
         );
     }
 }

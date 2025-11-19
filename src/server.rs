@@ -88,13 +88,12 @@ async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
         let query_map = request.uri().query().map(parse_query_map);
         let error_trigger = extract_error_trigger(request.headers(), query_map.as_ref());
 
-        if let Some(trigger) = error_trigger.as_deref() {
-            if let Some(route) = candidates
+        if let Some(trigger) = error_trigger.as_deref()
+            && let Some(route) = candidates
                 .iter()
                 .find(|candidate| candidate.error_trigger() == Some(trigger))
-            {
-                return respond_from_runtime(route).await;
-            }
+        {
+            return respond_from_runtime(route).await;
         }
 
         let matching_route = candidates
@@ -186,7 +185,7 @@ impl TryFrom<Config> for AppState {
                  query_summary: Option<BTreeMap<String, String>>| {
                     let summary_status = runtime.status.as_u16();
                     let summary_error = runtime.error_trigger().map(str::to_string);
-                    let entry = routes.entry(key.clone()).or_insert_with(Vec::new);
+                    let entry = routes.entry(key.clone()).or_default();
                     if let Some(existing) = entry
                         .iter_mut()
                         .find(|existing| existing.same_query_signature(&runtime))
