@@ -1,9 +1,9 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{io::ErrorKind, net::SocketAddr, path::PathBuf};
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 mod config;
@@ -46,15 +46,10 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "127.0.0.1".to_string());
     let port = cli.port.or(server_settings.port).unwrap_or(8080);
 
-    let addr: SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .context("Invalid host/port combination")?;
+    let (listener, addr) = bind_with_fallback(&host, port).await?;
 
     info!(%addr, "Mock API running");
 
-    let listener = TcpListener::bind(addr)
-        .await
-        .context("Failed to bind socket")?;
     axum::serve(listener, router)
         .await
         .context("Server execution failed")?;
@@ -69,4 +64,26 @@ fn init_tracing() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .try_init();
+}
+
+async fn bind_with_fallback(host: &str, start_port: u16) -> Result<(TcpListener, SocketAddr)> {
+    let mut port = start_port;
+
+    loop {
+        let addr: SocketAddr = format!("{}:{}", host, port)
+            .parse()
+            .context("Invalid host/port combination")?;
+
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok((listener, addr)),
+            Err(error) if error.kind() == ErrorKind::AddrInUse => {
+                let next_port = port
+                    .checked_add(1)
+                    .context("No available port above requested port")?;
+                warn!(%addr, next_port, "Port unavailable, trying next port");
+                port = next_port;
+            }
+            Err(error) => return Err(error).context("Failed to bind socket"),
+        }
+    }
 }
