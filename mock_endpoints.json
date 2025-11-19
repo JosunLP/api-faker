@@ -1,0 +1,43 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "description": "Returns a list of demo users.",
+      "status": 200,
+      "body": {
+        "users": [
+          { "id": 1, "name": "Ada" },
+          { "id": 2, "name": "Linus" }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/users",
+      "description": "Pretend to create a new user.",
+      "status": 201,
+      "body": {
+        "id": 999,
+        "message": "User created"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/reports/slow",
+      "description": "Simulates a slow endpoint for testing loading states.",
+      "status": 200,
+      "delay_ms": 1200,
+      "body": {
+        "status": "still crunching numbers"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/jobs/42",
+      "description": "Returns a simple confirmation as plain text.",
+      "status": 202,
+      "text_body": "Job 42 scheduled for deletion"
+    }
+  ]
+}
