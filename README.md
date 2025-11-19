@@ -6,6 +6,7 @@ Eine kleine Rust-Anwendung, die HTTP-Endpunkte aus einer JSON-Datei simuliert. I
 
 - Beliebige HTTP-Methoden (GET, POST, PUT, PATCH, DELETE, ...)
 - Frei definierbare Statuscodes, Header sowie JSON- oder Text-Bodies
+- Routen, die optional auf bestimmte Query-Parameter reagieren
 - Optionale künstliche Verzögerungen (`delay_ms`), um Ladezustände zu testen
 - Health-Check unter `GET /__health` und Auflistung aller konfigurierten Routen unter `GET /__routes`
 
@@ -25,6 +26,21 @@ Die Konfiguration liegt als JSON-Datei vor (Standard: `mock_endpoints.json`). Be
         "users": [
           { "id": 1, "name": "Ada" },
           { "id": 2, "name": "Linus" }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/users",
+      "description": "Filtered list for ?team=platform&active=true",
+      "status": 200,
+      "query": {
+        "team": "platform",
+        "active": "true"
+      },
+      "body": {
+        "users": [
+          { "id": 42, "name": "Grace" }
         ]
       }
     },
@@ -61,16 +77,17 @@ Die Konfiguration liegt als JSON-Datei vor (Standard: `mock_endpoints.json`). Be
 
 ### Routenfelder
 
-| Feld          | Typ               | Beschreibung                                        |
-| ------------- | ----------------- | --------------------------------------------------- |
-| `method`      | String            | HTTP-Methode (z. B. `GET`, `POST`, …)               |
-| `path`        | String            | Vollständiger Pfad, der exakt gematcht wird         |
-| `status`      | Zahl (optional)   | HTTP-Statuscode (Default `200`)                     |
-| `headers`     | Objekt (optional) | Key-Value-Paare für zusätzliche Header              |
-| `body`        | JSON (optional)   | Beliebiger JSON-Body                                |
-| `text_body`   | String (optional) | Plain-Text-Antwort (z. B. für einfache Meldungen)   |
-| `delay_ms`    | Zahl (optional)   | Verzögerung in Millisekunden vor dem Antworten      |
-| `description` | String (optional) | Freitext-Beschreibung; erscheint in `GET /__routes` |
+| Feld          | Typ               | Beschreibung                                           |
+| ------------- | ----------------- | ------------------------------------------------------ |
+| `method`      | String            | HTTP-Methode (z. B. `GET`, `POST`, …)                  |
+| `path`        | String            | Vollständiger Pfad, der exakt gematcht wird            |
+| `status`      | Zahl (optional)   | HTTP-Statuscode (Default `200`)                        |
+| `headers`     | Objekt (optional) | Key-Value-Paare für zusätzliche Header                 |
+| `body`        | JSON (optional)   | Beliebiger JSON-Body                                   |
+| `text_body`   | String (optional) | Plain-Text-Antwort (z. B. für einfache Meldungen)      |
+| `query`       | Objekt (optional) | Key-Value-Paare, die als Query-Parameter verlangt sind |
+| `delay_ms`    | Zahl (optional)   | Verzögerung in Millisekunden vor dem Antworten         |
+| `description` | String (optional) | Freitext-Beschreibung; erscheint in `GET /__routes`    |
 
 ## Nutzung
 
@@ -97,4 +114,7 @@ Danach stehen alle konfigurierten Endpunkte unter `http://host:port` bereit.
 - Doppelte Kombinationen aus Methode + Pfad überschreiben sich; im Log erscheint ein Hinweis.
 - Über `__routes` lässt sich schnell prüfen, welche Mocks aktuell aktiv sind.
 
-> Hinweis: Pro Route kann entweder `body` **oder** `text_body` gesetzt werden. Bei Textantworten wird automatisch `text/plain; charset=utf-8` gesetzt, sofern kein eigener `Content-Type` angegeben ist.
+> Hinweise:
+>
+> - Pro Route kann entweder `body` **oder** `text_body` gesetzt werden. Bei Textantworten wird automatisch `text/plain; charset=utf-8` gesetzt, sofern kein eigener `Content-Type` angegeben ist.
+> - Wenn mehrere Routen denselben Pfad besitzen, werden zuerst diejenigen mit passenden `query`-Parametern geprüft, bevor eine generische Route greift.

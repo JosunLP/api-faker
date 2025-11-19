@@ -13,6 +13,21 @@
       }
     },
     {
+      "method": "GET",
+      "path": "/users",
+      "description": "Filtered list when ?team=platform&active=true",
+      "status": 200,
+      "query": {
+        "team": "platform",
+        "active": "true"
+      },
+      "body": {
+        "users": [
+          { "id": 42, "name": "Grace" }
+        ]
+      }
+    },
+    {
       "method": "POST",
       "path": "/users",
       "description": "Pretend to create a new user.",

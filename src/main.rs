@@ -21,6 +21,7 @@ use serde_json::json;
 use tokio::{fs, net::TcpListener, time::sleep};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+use url::form_urlencoded;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Serve fake API endpoints from a JSON file.")]
@@ -95,31 +96,45 @@ async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
         path: path.clone(),
     };
 
-    if let Some(route) = state.routes.get(&key) {
-        if let Some(delay) = route.delay {
-            sleep(delay).await;
-        }
-
-        let mut builder = Response::builder().status(route.status);
-        for (name, value) in route.headers.iter() {
-            builder = builder.header(name, value);
-        }
-
-        let body = route
-            .body
-            .as_ref()
-            .map(|bytes| Body::from(bytes.as_ref().clone()))
-            .unwrap_or_else(Body::empty);
-
-        return builder
-            .body(body)
-            .unwrap_or_else(|error| {
-                warn!(?error, "Antwort konnte nicht erstellt werden");
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from("response error"))
-                    .expect("valid response")
+    if let Some(candidates) = state.routes.get(&key) {
+        let query_map = request.uri().query().map(parse_query_map);
+        let matching_route = candidates
+            .iter()
+            .filter(|candidate| candidate.query_params.is_some())
+            .find(|candidate| candidate.matches_query(query_map.as_ref()))
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .filter(|candidate| candidate.query_params.is_none())
+                    .find(|candidate| candidate.matches_query(query_map.as_ref()))
             });
+
+        if let Some(route) = matching_route {
+            if let Some(delay) = route.delay {
+                sleep(delay).await;
+            }
+
+            let mut builder = Response::builder().status(route.status);
+            for (name, value) in route.headers.iter() {
+                builder = builder.header(name, value);
+            }
+
+            let body = route
+                .body
+                .as_ref()
+                .map(|bytes| Body::from(bytes.as_ref().clone()))
+                .unwrap_or_else(Body::empty);
+
+            return builder
+                .body(body)
+                .unwrap_or_else(|error| {
+                    warn!(?error, "Antwort konnte nicht erstellt werden");
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("response error"))
+                        .expect("valid response")
+                });
+        }
     }
 
     warn!(method = %method, path, "Kein Mock definiert");
@@ -161,6 +176,8 @@ struct RouteConfig {
     #[serde(default)]
     text_body: Option<String>,
     #[serde(default)]
+    query: BTreeMap<String, String>,
+    #[serde(default)]
     delay_ms: Option<u64>,
     #[serde(default)]
     description: Option<String>,
@@ -168,7 +185,7 @@ struct RouteConfig {
 
 #[derive(Clone)]
 struct AppState {
-    routes: Arc<HashMap<RouteKey, RouteRuntime>>,
+    routes: Arc<HashMap<RouteKey, Vec<RouteRuntime>>>,
     summaries: Arc<Vec<RouteSummary>>,
 }
 
@@ -176,7 +193,7 @@ impl TryFrom<Config> for AppState {
     type Error = anyhow::Error;
 
     fn try_from(config: Config) -> Result<Self> {
-        let mut routes = HashMap::new();
+        let mut routes: HashMap<RouteKey, Vec<RouteRuntime>> = HashMap::new();
         let mut summaries = Vec::new();
 
         for route in config.routes {
@@ -184,15 +201,27 @@ impl TryFrom<Config> for AppState {
             let path_string = route.path.clone();
             let status = route.status;
             let description = route.description.clone();
+            let query_summary = if route.query.is_empty() {
+                None
+            } else {
+                Some(route.query.clone())
+            };
 
             let runtime = RouteRuntime::try_from(&route)?;
             let key = RouteKey {
-                method: route.method,
-                path: route.path,
+                method: route.method.clone(),
+                path: route.path.clone(),
             };
 
-            if routes.insert(key, runtime).is_some() {
-                warn!(method = %method_string, path = %path_string, "Doppelter Eintrag überschrieben");
+            let entry = routes.entry(key).or_insert_with(Vec::new);
+            if let Some(existing) = entry
+                .iter_mut()
+                .find(|existing| existing.same_query_signature(&runtime))
+            {
+                warn!(method = %method_string, path = %path_string, "Doppelter Eintrag mit identischen Query-Parametern überschrieben");
+                *existing = runtime;
+            } else {
+                entry.push(runtime);
             }
 
             summaries.push(RouteSummary {
@@ -200,6 +229,7 @@ impl TryFrom<Config> for AppState {
                 path: path_string,
                 status,
                 description,
+                query: query_summary,
             });
         }
 
@@ -216,6 +246,7 @@ struct RouteRuntime {
     headers: Arc<Vec<(HeaderName, HeaderValue)>>,
     body: Option<Arc<Vec<u8>>>,
     delay: Option<Duration>,
+    query_params: Option<Arc<Vec<(String, String)>>>,
 }
 
 impl RouteRuntime {
@@ -264,13 +295,51 @@ impl RouteRuntime {
         }
 
         let delay = route.delay_ms.map(Duration::from_millis);
+        let query_params = if route.query.is_empty() {
+            None
+        } else {
+            Some(Arc::new(
+                route
+                    .query
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ))
+        };
 
         Ok(Self {
             status,
             headers: Arc::new(headers),
             body: body_bytes,
             delay,
+            query_params,
         })
+    }
+
+    fn same_query_signature(&self, other: &RouteRuntime) -> bool {
+        match (&self.query_params, &other.query_params) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.as_slice() == b.as_slice(),
+            _ => false,
+        }
+    }
+
+    fn matches_query(&self, query: Option<&BTreeMap<String, Vec<String>>>) -> bool {
+        match &self.query_params {
+            None => true,
+            Some(expected) => {
+                let actual = match query {
+                    Some(map) => map,
+                    None => return false,
+                };
+                expected.iter().all(|(key, value)| {
+                    actual
+                        .get(key)
+                        .map(|vals| vals.iter().any(|candidate| candidate == value))
+                        .unwrap_or(false)
+                })
+            }
+        }
     }
 }
 
@@ -286,6 +355,7 @@ struct RouteSummary {
     path: String,
     status: u16,
     description: Option<String>,
+    query: Option<BTreeMap<String, String>>,
 }
 
 fn default_status() -> u16 {
@@ -298,4 +368,13 @@ where
 {
     let raw = String::deserialize(deserializer)?;
     raw.parse::<Method>().map_err(D::Error::custom)
+}
+
+fn parse_query_map(raw: &str) -> BTreeMap<String, Vec<String>> {
+    form_urlencoded::parse(raw.as_bytes())
+        .into_owned()
+        .fold(BTreeMap::new(), |mut acc, (key, value)| {
+            acc.entry(key).or_default().push(value);
+            acc
+        })
 }
