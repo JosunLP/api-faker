@@ -145,7 +145,8 @@ impl RouteRuntime {
             BodySpec::None => (None, None),
         };
 
-        if body_bytes.is_some() && !has_content_type
+        if body_bytes.is_some()
+            && !has_content_type
             && let Some(default) = default_ct
         {
             headers.push((CONTENT_TYPE, HeaderValue::from_static(default)));
