@@ -41,6 +41,24 @@
           "status": 503,
           "text_body": "team backend currently unavailable"
         }
+      ],
+      "error_variants": [
+        {
+          "name": "users-timeout",
+          "description": "Force a temporary outage via ?__error=users-timeout or header x-api-faker-error",
+          "status": 503,
+          "delay_ms": 1500,
+          "text_body": "upstream dependency unavailable"
+        },
+        {
+          "name": "users-unauthorized",
+          "description": "Simulate an authorization error",
+          "status": 401,
+          "headers": {
+            "WWW-Authenticate": "Bearer realm=mock"
+          },
+          "text_body": "missing or invalid token"
+        }
       ]
     },
     {

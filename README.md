@@ -9,6 +9,7 @@ Eine kleine Rust-Anwendung, die HTTP-Endpunkte aus einer JSON-Datei simuliert. I
 - Routen, die optional auf bestimmte Query-Parameter reagieren – inklusive Varianten für unterschiedliche Werte
 - Optionale künstliche Verzögerungen (`delay_ms`), um Ladezustände zu testen
 - Health-Check unter `GET /__health` und Auflistung aller konfigurierten Routen unter `GET /__routes`
+- Fehlervarianten, die sich gezielt über `?__error=name` oder den Header `x-api-faker-error: name` erzwingen lassen
 
 ## Konfigurationsdatei
 
@@ -93,20 +94,32 @@ Die Konfiguration liegt als JSON-Datei vor (Standard: `mock_endpoints.json`). Be
 
 ### Routenfelder
 
-| Feld          | Typ               | Beschreibung                                           |
-| ------------- | ----------------- | ------------------------------------------------------ |
-| `method`      | String            | HTTP-Methode (z. B. `GET`, `POST`, …)                  |
-| `path`        | String            | Vollständiger Pfad, der exakt gematcht wird            |
-| `status`      | Zahl (optional)   | HTTP-Statuscode (Default `200`)                        |
-| `headers`     | Objekt (optional) | Key-Value-Paare für zusätzliche Header                 |
-| `body`        | JSON (optional)   | Beliebiger JSON-Body                                   |
-| `text_body`   | String (optional) | Plain-Text-Antwort (z. B. für einfache Meldungen)      |
-| `query`       | Objekt (optional) | Key-Value-Paare, die als Query-Parameter verlangt sind |
-| `delay_ms`    | Zahl (optional)   | Verzögerung in Millisekunden vor dem Antworten         |
-| `variants`    | Array (optional)  | Liste von Varianten mit eigenen Overrides              |
-| `description` | String (optional) | Freitext-Beschreibung; erscheint in `GET /__routes`    |
+| Feld             | Typ               | Beschreibung                                                              |
+| ---------------- | ----------------- | ------------------------------------------------------------------------- |
+| `method`         | String            | HTTP-Methode (z. B. `GET`, `POST`, …)                                     |
+| `path`           | String            | Vollständiger Pfad, der exakt gematcht wird                               |
+| `status`         | Zahl (optional)   | HTTP-Statuscode (Default `200`)                                           |
+| `headers`        | Objekt (optional) | Key-Value-Paare für zusätzliche Header                                    |
+| `body`           | JSON (optional)   | Beliebiger JSON-Body                                                      |
+| `text_body`      | String (optional) | Plain-Text-Antwort (z. B. für einfache Meldungen)                         |
+| `query`          | Objekt (optional) | Key-Value-Paare, die als Query-Parameter verlangt sind                    |
+| `delay_ms`       | Zahl (optional)   | Verzögerung in Millisekunden vor dem Antworten                            |
+| `variants`       | Array (optional)  | Liste von Varianten mit eigenen Overrides                                 |
+| `error_variants` | Array (optional)  | Benannte Fehlervarianten, die über `__error` oder Header aktiviert werden |
+| `description`    | String (optional) | Freitext-Beschreibung; erscheint in `GET /__routes`                       |
 
-Jede Variante kann diese Felder überschreiben (alle optional, sonst erbt sie den Wert der Hauptroute): `query`, `headers`, `body`, `text_body`, `status`, `delay_ms`, `description`.
+Jede normale Variante kann diese Felder überschreiben (alle optional, sonst erbt sie den Wert der Hauptroute): `query`, `headers`, `body`, `text_body`, `status`, `delay_ms`, `description`.
+
+### Fehlervarianten
+
+Mit `error_variants` lassen sich gezielt Fehlerfälle triggern, ohne die realen Query-Parameter der Route zu verändern. Jede Fehlervariante benötigt ein eindeutiges `name`-Feld und kann optional dieselben Felder wie die Hauptroute überschreiben (`headers`, `body`, `text_body`, `status`, `delay_ms`, `description`).
+
+Aktivierungsmöglichkeiten:
+
+- Query-Parameter `?__error=<name>`
+- HTTP-Header `x-api-faker-error: <name>`
+
+Passt der Name, hat die Fehlervariante Vorrang vor allen anderen Varianten. In `GET /__routes` taucht sie mit ihrem `error_trigger` auf, damit ersichtlich bleibt, wie sie ausgelöst wird.
 
 ## Nutzung
 

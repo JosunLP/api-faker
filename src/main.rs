@@ -6,17 +6,17 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use axum::{
+    Json, Router,
     body::{Body, Bytes},
     extract::{Request, State},
-    http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Method, StatusCode},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE},
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use clap::Parser;
-use serde::{de::Error as _, ser::Serializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Error as _, ser::Serializer};
 use serde_json::json;
 use tokio::{fs, net::TcpListener, time::sleep};
 use tracing::{info, warn};
@@ -69,7 +69,9 @@ fn init_tracing() {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("api_faker=info,axum=info"));
 
-    let _ = tracing_subscriber::fmt().with_env_filter(env_filter).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .try_init();
 }
 
 fn build_router(state: AppState) -> Router {
@@ -79,6 +81,9 @@ fn build_router(state: AppState) -> Router {
         .fallback(dispatch)
         .with_state(state)
 }
+
+const ERROR_QUERY_PARAM: &str = "__error";
+const ERROR_HEADER_NAME: &str = "x-api-faker-error";
 
 async fn health() -> impl IntoResponse {
     Json(json!({ "status": "ok" }))
@@ -98,36 +103,25 @@ async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
 
     if let Some(candidates) = state.routes.get(&key) {
         let query_map = request.uri().query().map(parse_query_map);
+        let error_trigger = extract_error_trigger(request.headers(), query_map.as_ref());
+
+        if let Some(trigger) = error_trigger.as_deref() {
+            if let Some(route) = candidates
+                .iter()
+                .find(|candidate| candidate.error_trigger() == Some(trigger))
+            {
+                return respond_from_runtime(route).await;
+            }
+        }
+
         let matching_route = candidates
             .iter()
+            .filter(|candidate| !candidate.is_error())
             .filter(|candidate| candidate.matches_query(query_map.as_ref()))
             .max_by_key(|candidate| candidate.specificity_rank());
 
         if let Some(route) = matching_route {
-            if let Some(delay) = route.delay {
-                sleep(delay).await;
-            }
-
-            let mut builder = Response::builder().status(route.status);
-            for (name, value) in route.headers.iter() {
-                builder = builder.header(name, value);
-            }
-
-            let body = route
-                .body
-                .as_ref()
-                .map(|bytes| Body::from(bytes.clone()))
-                .unwrap_or_else(Body::empty);
-
-            return builder
-                .body(body)
-                .unwrap_or_else(|error| {
-                    warn!(?error, "Antwort konnte nicht erstellt werden");
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from("response error"))
-                        .expect("valid response")
-                });
+            return respond_from_runtime(route).await;
         }
     }
 
@@ -137,6 +131,50 @@ async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
         "message": "Für diese Kombination aus Methode und Pfad ist kein Mock konfiguriert.",
     });
     (StatusCode::NOT_FOUND, Json(payload)).into_response()
+}
+
+async fn respond_from_runtime(route: &RouteRuntime) -> Response {
+    if let Some(delay) = route.delay {
+        sleep(delay).await;
+    }
+
+    let mut builder = Response::builder().status(route.status);
+    for (name, value) in route.headers.iter() {
+        builder = builder.header(name, value);
+    }
+
+    let body = route
+        .body
+        .as_ref()
+        .map(|bytes| Body::from(bytes.clone()))
+        .unwrap_or_else(Body::empty);
+
+    builder.body(body).unwrap_or_else(|error| {
+        warn!(?error, "Antwort konnte nicht erstellt werden");
+        Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from("response error"))
+            .expect("valid response")
+    })
+}
+
+fn extract_error_trigger(
+    headers: &HeaderMap,
+    query: Option<&BTreeMap<String, Vec<String>>>,
+) -> Option<String> {
+    if let Some(value) = headers
+        .get(ERROR_HEADER_NAME)
+        .and_then(|value| value.to_str().ok())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(value.to_string());
+    }
+
+    query
+        .and_then(|map| map.get(ERROR_QUERY_PARAM))
+        .and_then(|values| values.last())
+        .map(|value| value.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -177,12 +215,31 @@ struct RouteConfig {
     description: Option<String>,
     #[serde(default)]
     variants: Vec<RouteVariantConfig>,
+    #[serde(default)]
+    error_variants: Vec<RouteErrorVariantConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RouteVariantConfig {
     #[serde(default)]
     query: BTreeMap<String, String>,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    #[serde(default)]
+    body: Option<serde_json::Value>,
+    #[serde(default)]
+    text_body: Option<String>,
+    #[serde(default)]
+    status: Option<u16>,
+    #[serde(default)]
+    delay_ms: Option<u64>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteErrorVariantConfig {
+    name: String,
     #[serde(default)]
     headers: BTreeMap<String, String>,
     #[serde(default)]
@@ -218,29 +275,32 @@ impl TryFrom<Config> for AppState {
                 path: route.path.clone(),
             };
 
-            let mut push_runtime = |runtime: RouteRuntime,
-                                    description: Option<String>,
-                                    query_summary: Option<BTreeMap<String, String>>| {
-                let summary_status = runtime.status.as_u16();
-                let entry = routes.entry(key.clone()).or_insert_with(Vec::new);
-                if let Some(existing) = entry
-                    .iter_mut()
-                    .find(|existing| existing.same_query_signature(&runtime))
-                {
-                    warn!(method = %method_string, path = %path_string, "Doppelter Eintrag mit identischen Query-Parametern überschrieben");
-                    *existing = runtime;
-                } else {
-                    entry.push(runtime);
-                }
+            let mut push_runtime =
+                |runtime: RouteRuntime,
+                 description: Option<String>,
+                 query_summary: Option<BTreeMap<String, String>>| {
+                    let summary_status = runtime.status.as_u16();
+                    let summary_error = runtime.error_trigger().map(str::to_string);
+                    let entry = routes.entry(key.clone()).or_insert_with(Vec::new);
+                    if let Some(existing) = entry
+                        .iter_mut()
+                        .find(|existing| existing.same_query_signature(&runtime))
+                    {
+                        warn!(method = %method_string, path = %path_string, "Doppelter Eintrag mit identischen Query-Parametern überschrieben");
+                        *existing = runtime;
+                    } else {
+                        entry.push(runtime);
+                    }
 
-                summaries.push(RouteSummary {
-                    method: method_string.clone(),
-                    path: path_string.clone(),
-                    status: summary_status,
-                    description,
-                    query: query_summary,
-                });
-            };
+                    summaries.push(RouteSummary {
+                        method: method_string.clone(),
+                        path: path_string.clone(),
+                        status: summary_status,
+                        description,
+                        query: query_summary,
+                        error_trigger: summary_error,
+                    });
+                };
 
             let base_query_summary = if route.query.is_empty() {
                 None
@@ -248,7 +308,7 @@ impl TryFrom<Config> for AppState {
                 Some(route.query.clone())
             };
             let base_description = route.description.clone();
-            let base_runtime = RouteRuntime::from_config(&route, None)?;
+            let base_runtime = RouteRuntime::from_source(&route, VariantSource::Base)?;
             push_runtime(base_runtime, base_description, base_query_summary);
 
             for variant in &route.variants {
@@ -266,8 +326,18 @@ impl TryFrom<Config> for AppState {
                     Some(variant.query.clone())
                 };
 
-                let runtime = RouteRuntime::from_config(&route, Some(variant))?;
+                let runtime = RouteRuntime::from_source(&route, VariantSource::Query(variant))?;
                 push_runtime(runtime, variant_description, variant_query);
+            }
+
+            for error_variant in &route.error_variants {
+                let description = error_variant
+                    .description
+                    .clone()
+                    .or_else(|| route.description.clone());
+                let runtime =
+                    RouteRuntime::from_source(&route, VariantSource::Error(error_variant))?;
+                push_runtime(runtime, description, None);
             }
         }
 
@@ -285,19 +355,40 @@ struct RouteRuntime {
     body: Option<Bytes>,
     delay: Option<Duration>,
     query_params: Option<Arc<Vec<(String, String)>>>,
+    error_trigger: Option<Arc<String>>,
+}
+
+#[derive(Clone, Copy)]
+enum VariantSource<'a> {
+    Base,
+    Query(&'a RouteVariantConfig),
+    Error(&'a RouteErrorVariantConfig),
 }
 
 impl RouteRuntime {
-    fn from_config(route: &RouteConfig, variant: Option<&RouteVariantConfig>) -> Result<Self> {
-        let status_raw = variant.and_then(|v| v.status).unwrap_or(route.status);
+    fn from_source(route: &RouteConfig, source: VariantSource<'_>) -> Result<Self> {
+        let status_raw = match source {
+            VariantSource::Base => route.status,
+            VariantSource::Query(variant) => variant.status.unwrap_or(route.status),
+            VariantSource::Error(variant) => variant.status.unwrap_or(route.status),
+        };
+
         let status = StatusCode::from_u16(status_raw)
             .with_context(|| format!("Ungültiger Statuscode {}", status_raw))?;
 
         let mut header_map = route.headers.clone();
-        if let Some(variant) = variant {
-            for (name, value) in &variant.headers {
-                header_map.insert(name.clone(), value.clone());
+        match source {
+            VariantSource::Query(variant) => {
+                for (name, value) in &variant.headers {
+                    header_map.insert(name.clone(), value.clone());
+                }
             }
+            VariantSource::Error(variant) => {
+                for (name, value) in &variant.headers {
+                    header_map.insert(name.clone(), value.clone());
+                }
+            }
+            VariantSource::Base => {}
         }
 
         let mut headers = Vec::new();
@@ -317,48 +408,70 @@ impl RouteRuntime {
             headers.push((header_name, header_value));
         }
 
-        if route.body.is_some() && route.text_body.is_some() {
-            bail!(
-                "Route {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
-                route.method,
-                route.path
-            );
-        }
-
-        if let Some(variant_cfg) = variant {
-            if variant_cfg.body.is_some() && variant_cfg.text_body.is_some() {
-                bail!(
-                    "Variante von {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
-                    route.method,
-                    route.path
-                );
-            }
-        }
-
         enum BodySpec<'a> {
             Json(&'a serde_json::Value),
             Text(&'a str),
             None,
         }
 
-        let body_spec = if let Some(variant_cfg) = variant {
-            if let Some(body) = variant_cfg.body.as_ref() {
-                BodySpec::Json(body)
-            } else if let Some(text) = variant_cfg.text_body.as_ref() {
-                BodySpec::Text(text)
-            } else if let Some(body) = route.body.as_ref() {
-                BodySpec::Json(body)
-            } else if let Some(text) = route.text_body.as_ref() {
-                BodySpec::Text(text)
-            } else {
-                BodySpec::None
+        let body_spec = match source {
+            VariantSource::Base => {
+                if route.body.is_some() && route.text_body.is_some() {
+                    bail!(
+                        "Route {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
+                        route.method,
+                        route.path
+                    );
+                }
+                if let Some(body) = route.body.as_ref() {
+                    BodySpec::Json(body)
+                } else if let Some(text) = route.text_body.as_ref() {
+                    BodySpec::Text(text)
+                } else {
+                    BodySpec::None
+                }
             }
-        } else if let Some(body) = route.body.as_ref() {
-            BodySpec::Json(body)
-        } else if let Some(text) = route.text_body.as_ref() {
-            BodySpec::Text(text)
-        } else {
-            BodySpec::None
+            VariantSource::Query(variant) => {
+                if variant.body.is_some() && variant.text_body.is_some() {
+                    bail!(
+                        "Variante von {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
+                        route.method,
+                        route.path
+                    );
+                }
+                if let Some(body) = variant.body.as_ref() {
+                    BodySpec::Json(body)
+                } else if let Some(text) = variant.text_body.as_ref() {
+                    BodySpec::Text(text)
+                } else if let Some(body) = route.body.as_ref() {
+                    BodySpec::Json(body)
+                } else if let Some(text) = route.text_body.as_ref() {
+                    BodySpec::Text(text)
+                } else {
+                    BodySpec::None
+                }
+            }
+            VariantSource::Error(variant) => {
+                if variant.body.is_some() && variant.text_body.is_some() {
+                    bail!(
+                        "Fehlervariante '{}' für {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
+                        variant.name,
+                        route.method,
+                        route.path
+                    );
+                }
+                if let Some(body) = variant.body.as_ref() {
+                    BodySpec::Json(body)
+                } else if let Some(text) = variant.text_body.as_ref() {
+                    BodySpec::Text(text)
+                } else if let Some(body) = route.body.as_ref() {
+                    BodySpec::Json(body)
+                } else if let Some(text) = route.text_body.as_ref() {
+                    BodySpec::Text(text)
+                } else {
+                    BodySpec::None
+                }
+            }
         };
 
         let (body_bytes, default_ct): (Option<Bytes>, Option<&'static str>) = match body_spec {
@@ -380,20 +493,39 @@ impl RouteRuntime {
             }
         }
 
-        let delay = variant
-            .and_then(|v| v.delay_ms)
-            .or(route.delay_ms)
-            .map(Duration::from_millis);
+        let delay = match source {
+            VariantSource::Base => route.delay_ms,
+            VariantSource::Query(variant) => variant.delay_ms.or(route.delay_ms),
+            VariantSource::Error(variant) => variant.delay_ms.or(route.delay_ms),
+        }
+        .map(Duration::from_millis);
 
-        let query_source = match variant {
-            Some(variant) if !variant.query.is_empty() => Some(&variant.query),
-            _ if !route.query.is_empty() => Some(&route.query),
-            _ => None,
+        let query_params = match source {
+            VariantSource::Error(_) => None,
+            VariantSource::Base => map_query_arc(&route.query),
+            VariantSource::Query(variant) => {
+                if !variant.query.is_empty() {
+                    map_query_arc(&variant.query)
+                } else {
+                    map_query_arc(&route.query)
+                }
+            }
         };
 
-        let query_params = query_source.map(|map| {
-            Arc::new(map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-        });
+        let error_trigger = match source {
+            VariantSource::Error(variant) => {
+                let trimmed = variant.name.trim();
+                if trimmed.is_empty() {
+                    bail!(
+                        "Fehlervariante für {} {} benötigt ein nicht-leeres 'name'-Feld.",
+                        route.method,
+                        route.path
+                    );
+                }
+                Some(Arc::new(trimmed.to_string()))
+            }
+            _ => None,
+        };
 
         Ok(Self {
             status,
@@ -401,10 +533,15 @@ impl RouteRuntime {
             body: body_bytes,
             delay,
             query_params,
+            error_trigger,
         })
     }
 
     fn same_query_signature(&self, other: &RouteRuntime) -> bool {
+        if self.error_trigger.as_deref() != other.error_trigger.as_deref() {
+            return false;
+        }
+
         match (&self.query_params, &other.query_params) {
             (None, None) => true,
             (Some(a), Some(b)) => a.as_slice() == b.as_slice(),
@@ -433,6 +570,26 @@ impl RouteRuntime {
     fn specificity_rank(&self) -> u8 {
         if self.query_params.is_some() { 1 } else { 0 }
     }
+
+    fn error_trigger(&self) -> Option<&str> {
+        self.error_trigger.as_deref().map(|s| s.as_str())
+    }
+
+    fn is_error(&self) -> bool {
+        self.error_trigger.is_some()
+    }
+}
+
+fn map_query_arc(map: &BTreeMap<String, String>) -> Option<Arc<Vec<(String, String)>>> {
+    if map.is_empty() {
+        None
+    } else {
+        Some(Arc::new(
+            map.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<_>>(),
+        ))
+    }
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
@@ -448,6 +605,7 @@ struct RouteSummary {
     status: u16,
     description: Option<String>,
     query: Option<BTreeMap<String, String>>,
+    error_trigger: Option<String>,
 }
 
 #[derive(Clone)]
@@ -475,12 +633,13 @@ where
 }
 
 fn parse_query_map(raw: &str) -> BTreeMap<String, Vec<String>> {
-    form_urlencoded::parse(raw.as_bytes())
-        .into_owned()
-        .fold(BTreeMap::new(), |mut acc, (key, value)| {
+    form_urlencoded::parse(raw.as_bytes()).into_owned().fold(
+        BTreeMap::new(),
+        |mut acc, (key, value)| {
             acc.entry(key).or_default().push(value);
             acc
-        })
+        },
+    )
 }
 
 #[cfg(test)]
@@ -500,6 +659,7 @@ mod tests {
             delay_ms: None,
             description: None,
             variants: Vec::new(),
+            error_variants: Vec::new(),
         };
 
         let variant = RouteVariantConfig {
@@ -512,13 +672,96 @@ mod tests {
             description: None,
         };
 
-        let runtime = RouteRuntime::from_config(&route, Some(&variant)).expect("runtime");
+        let runtime =
+            RouteRuntime::from_source(&route, VariantSource::Query(&variant)).expect("runtime");
         let body = runtime.body.clone().expect("body");
         assert_eq!(body, Bytes::from_static(b"hello world"));
 
-        assert!(runtime
-            .headers
-            .iter()
-            .any(|(name, value)| name == &CONTENT_TYPE && value == "text/plain; charset=utf-8"));
+        assert!(
+            runtime
+                .headers
+                .iter()
+                .any(|(name, value)| name == &CONTENT_TYPE && value == "text/plain; charset=utf-8")
+        );
+    }
+
+    #[test]
+    fn error_variant_inherits_base_headers() {
+        let mut base_headers = BTreeMap::new();
+        base_headers.insert("x-base".into(), "foo".into());
+
+        let route = RouteConfig {
+            method: Method::GET,
+            path: "/users".into(),
+            status: 200,
+            headers: base_headers,
+            body: Some(json!({"foo": "bar"})),
+            text_body: None,
+            query: BTreeMap::new(),
+            delay_ms: None,
+            description: None,
+            variants: Vec::new(),
+            error_variants: Vec::new(),
+        };
+
+        let error_variant = RouteErrorVariantConfig {
+            name: "boom".into(),
+            headers: BTreeMap::new(),
+            body: None,
+            text_body: Some("kaputt".into()),
+            status: Some(503),
+            delay_ms: None,
+            description: None,
+        };
+
+        let runtime = RouteRuntime::from_source(&route, VariantSource::Error(&error_variant))
+            .expect("runtime");
+        assert_eq!(runtime.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(runtime.error_trigger(), Some("boom"));
+        assert!(
+            runtime
+                .headers
+                .iter()
+                .any(|(name, value)| name == &CONTENT_TYPE && value == "text/plain; charset=utf-8")
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_prefers_error_variant_when_triggered() {
+        let route = RouteConfig {
+            method: Method::GET,
+            path: "/users".into(),
+            status: 200,
+            headers: BTreeMap::new(),
+            body: None,
+            text_body: Some("ok".into()),
+            query: BTreeMap::new(),
+            delay_ms: None,
+            description: None,
+            variants: Vec::new(),
+            error_variants: vec![RouteErrorVariantConfig {
+                name: "fail".into(),
+                headers: BTreeMap::new(),
+                body: None,
+                text_body: Some("nope".into()),
+                status: Some(500),
+                delay_ms: None,
+                description: None,
+            }],
+        };
+
+        let config = Config {
+            routes: vec![route],
+        };
+        let state = AppState::try_from(config).expect("state");
+
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("http://localhost/users?__error=fail")
+            .body(Body::empty())
+            .expect("request");
+
+        let response = dispatch(State(state.clone()), request).await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
