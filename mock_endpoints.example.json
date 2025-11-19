@@ -10,22 +10,38 @@
           { "id": 1, "name": "Ada" },
           { "id": 2, "name": "Linus" }
         ]
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/users",
-      "description": "Filtered list when ?team=platform&active=true",
-      "status": 200,
-      "query": {
-        "team": "platform",
-        "active": "true"
       },
-      "body": {
-        "users": [
-          { "id": 42, "name": "Grace" }
-        ]
-      }
+      "variants": [
+        {
+          "description": "Filtered list when ?team=platform&active=true",
+          "query": {
+            "team": "platform",
+            "active": "true"
+          },
+          "body": {
+            "users": [
+              { "id": 42, "name": "Grace" }
+            ]
+          }
+        },
+        {
+          "description": "Empty list for ?team=support",
+          "query": {
+            "team": "support"
+          },
+          "body": {
+            "users": []
+          }
+        },
+        {
+          "description": "Error when ?team=ops",
+          "query": {
+            "team": "ops"
+          },
+          "status": 503,
+          "text_body": "team backend currently unavailable"
+        }
+      ]
     },
     {
       "method": "POST",

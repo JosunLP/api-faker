@@ -181,6 +181,26 @@ struct RouteConfig {
     delay_ms: Option<u64>,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    variants: Vec<RouteVariantConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteVariantConfig {
+    #[serde(default)]
+    query: BTreeMap<String, String>,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    #[serde(default)]
+    body: Option<serde_json::Value>,
+    #[serde(default)]
+    text_body: Option<String>,
+    #[serde(default)]
+    status: Option<u16>,
+    #[serde(default)]
+    delay_ms: Option<u64>,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Clone)]
@@ -199,38 +219,62 @@ impl TryFrom<Config> for AppState {
         for route in config.routes {
             let method_string = route.method.to_string();
             let path_string = route.path.clone();
-            let status = route.status;
-            let description = route.description.clone();
-            let query_summary = if route.query.is_empty() {
-                None
-            } else {
-                Some(route.query.clone())
-            };
-
-            let runtime = RouteRuntime::try_from(&route)?;
             let key = RouteKey {
                 method: route.method.clone(),
                 path: route.path.clone(),
             };
 
-            let entry = routes.entry(key).or_insert_with(Vec::new);
-            if let Some(existing) = entry
-                .iter_mut()
-                .find(|existing| existing.same_query_signature(&runtime))
-            {
-                warn!(method = %method_string, path = %path_string, "Doppelter Eintrag mit identischen Query-Parametern überschrieben");
-                *existing = runtime;
-            } else {
-                entry.push(runtime);
-            }
+            let mut push_runtime = |runtime: RouteRuntime,
+                                    description: Option<String>,
+                                    query_summary: Option<BTreeMap<String, String>>| {
+                let summary_status = runtime.status.as_u16();
+                let entry = routes.entry(key.clone()).or_insert_with(Vec::new);
+                if let Some(existing) = entry
+                    .iter_mut()
+                    .find(|existing| existing.same_query_signature(&runtime))
+                {
+                    warn!(method = %method_string, path = %path_string, "Doppelter Eintrag mit identischen Query-Parametern überschrieben");
+                    *existing = runtime;
+                } else {
+                    entry.push(runtime);
+                }
 
-            summaries.push(RouteSummary {
-                method: method_string,
-                path: path_string,
-                status,
-                description,
-                query: query_summary,
-            });
+                summaries.push(RouteSummary {
+                    method: method_string.clone(),
+                    path: path_string.clone(),
+                    status: summary_status,
+                    description,
+                    query: query_summary,
+                });
+            };
+
+            let base_query_summary = if route.query.is_empty() {
+                None
+            } else {
+                Some(route.query.clone())
+            };
+            let base_description = route.description.clone();
+            let base_runtime = RouteRuntime::from_config(&route, None)?;
+            push_runtime(base_runtime, base_description, base_query_summary);
+
+            for variant in &route.variants {
+                let variant_description = variant
+                    .description
+                    .clone()
+                    .or_else(|| route.description.clone());
+                let variant_query = if variant.query.is_empty() {
+                    if route.query.is_empty() {
+                        None
+                    } else {
+                        Some(route.query.clone())
+                    }
+                } else {
+                    Some(variant.query.clone())
+                };
+
+                let runtime = RouteRuntime::from_config(&route, Some(variant))?;
+                push_runtime(runtime, variant_description, variant_query);
+            }
         }
 
         Ok(Self {
@@ -250,13 +294,21 @@ struct RouteRuntime {
 }
 
 impl RouteRuntime {
-    fn try_from(route: &RouteConfig) -> Result<Self> {
-        let status = StatusCode::from_u16(route.status)
-            .with_context(|| format!("Ungültiger Statuscode {}", route.status))?;
+    fn from_config(route: &RouteConfig, variant: Option<&RouteVariantConfig>) -> Result<Self> {
+        let status_raw = variant.and_then(|v| v.status).unwrap_or(route.status);
+        let status = StatusCode::from_u16(status_raw)
+            .with_context(|| format!("Ungültiger Statuscode {}", status_raw))?;
+
+        let mut header_map = route.headers.clone();
+        if let Some(variant) = variant {
+            for (name, value) in &variant.headers {
+                header_map.insert(name.clone(), value.clone());
+            }
+        }
 
         let mut headers = Vec::new();
         let mut has_content_type = false;
-        for (name, value) in &route.headers {
+        for (name, value) in header_map {
             let header_name: HeaderName = name
                 .parse()
                 .with_context(|| format!("Ungültiger Header-Name: {name}"))?;
@@ -271,7 +323,14 @@ impl RouteRuntime {
             headers.push((header_name, header_value));
         }
 
-        let (body_bytes, default_ct): (Option<Vec<u8>>, Option<&'static str>) = match (&route.body, &route.text_body) {
+        let body_value = variant
+            .and_then(|v| v.body.as_ref())
+            .or_else(|| route.body.as_ref());
+        let text_value = variant
+            .and_then(|v| v.text_body.as_ref())
+            .or_else(|| route.text_body.as_ref());
+
+        let (body_bytes, default_ct): (Option<Vec<u8>>, Option<&'static str>) = match (body_value, text_value) {
             (Some(_), Some(_)) => bail!(
                 "Route {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
                 route.method,
@@ -282,7 +341,7 @@ impl RouteRuntime {
                     .context("Antwort-Body konnte nicht serialisiert werden")?;
                 (Some(bytes), Some("application/json"))
             }
-            (None, Some(text)) => (Some(text.clone().into_bytes()), Some("text/plain; charset=utf-8")),
+            (None, Some(text)) => (Some(text.as_bytes().to_vec()), Some("text/plain; charset=utf-8")),
             (None, None) => (None, None),
         };
 
@@ -294,18 +353,20 @@ impl RouteRuntime {
             }
         }
 
-        let delay = route.delay_ms.map(Duration::from_millis);
-        let query_params = if route.query.is_empty() {
-            None
-        } else {
-            Some(Arc::new(
-                route
-                    .query
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            ))
+        let delay = variant
+            .and_then(|v| v.delay_ms)
+            .or(route.delay_ms)
+            .map(Duration::from_millis);
+
+        let query_source = match variant {
+            Some(variant) if !variant.query.is_empty() => Some(&variant.query),
+            _ if !route.query.is_empty() => Some(&route.query),
+            _ => None,
         };
+
+        let query_params = query_source.map(|map| {
+            Arc::new(map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        });
 
         Ok(Self {
             status,
@@ -343,7 +404,7 @@ impl RouteRuntime {
     }
 }
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq)]
 struct RouteKey {
     method: Method,
     path: String,

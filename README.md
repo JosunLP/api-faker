@@ -6,7 +6,7 @@ Eine kleine Rust-Anwendung, die HTTP-Endpunkte aus einer JSON-Datei simuliert. I
 
 - Beliebige HTTP-Methoden (GET, POST, PUT, PATCH, DELETE, ...)
 - Frei definierbare Statuscodes, Header sowie JSON- oder Text-Bodies
-- Routen, die optional auf bestimmte Query-Parameter reagieren
+- Routen, die optional auf bestimmte Query-Parameter reagieren – inklusive Varianten für unterschiedliche Werte
 - Optionale künstliche Verzögerungen (`delay_ms`), um Ladezustände zu testen
 - Health-Check unter `GET /__health` und Auflistung aller konfigurierten Routen unter `GET /__routes`
 
@@ -27,22 +27,38 @@ Die Konfiguration liegt als JSON-Datei vor (Standard: `mock_endpoints.json`). Be
           { "id": 1, "name": "Ada" },
           { "id": 2, "name": "Linus" }
         ]
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/users",
-      "description": "Filtered list for ?team=platform&active=true",
-      "status": 200,
-      "query": {
-        "team": "platform",
-        "active": "true"
       },
-      "body": {
-        "users": [
-          { "id": 42, "name": "Grace" }
-        ]
-      }
+      "variants": [
+        {
+          "description": "Filtered list for ?team=platform&active=true",
+          "query": {
+            "team": "platform",
+            "active": "true"
+          },
+          "body": {
+            "users": [
+              { "id": 42, "name": "Grace" }
+            ]
+          }
+        },
+        {
+          "description": "Empty list for ?team=support",
+          "query": {
+            "team": "support"
+          },
+          "body": {
+            "users": []
+          }
+        },
+        {
+          "description": "Error when ?team=ops",
+          "query": {
+            "team": "ops"
+          },
+          "status": 503,
+          "text_body": "team backend currently unavailable"
+        }
+      ]
     },
     {
       "method": "POST",
@@ -87,7 +103,10 @@ Die Konfiguration liegt als JSON-Datei vor (Standard: `mock_endpoints.json`). Be
 | `text_body`   | String (optional) | Plain-Text-Antwort (z. B. für einfache Meldungen)      |
 | `query`       | Objekt (optional) | Key-Value-Paare, die als Query-Parameter verlangt sind |
 | `delay_ms`    | Zahl (optional)   | Verzögerung in Millisekunden vor dem Antworten         |
+| `variants`    | Array (optional)  | Liste von Varianten mit eigenen Overrides              |
 | `description` | String (optional) | Freitext-Beschreibung; erscheint in `GET /__routes`    |
+
+Jede Variante kann diese Felder überschreiben (alle optional, sonst erbt sie den Wert der Hauptroute): `query`, `headers`, `body`, `text_body`, `status`, `delay_ms`, `description`.
 
 ## Nutzung
 
@@ -118,3 +137,4 @@ Danach stehen alle konfigurierten Endpunkte unter `http://host:port` bereit.
 >
 > - Pro Route kann entweder `body` **oder** `text_body` gesetzt werden. Bei Textantworten wird automatisch `text/plain; charset=utf-8` gesetzt, sofern kein eigener `Content-Type` angegeben ist.
 > - Wenn mehrere Routen denselben Pfad besitzen, werden zuerst diejenigen mit passenden `query`-Parametern geprüft, bevor eine generische Route greift.
+> - Innerhalb einer Route werden `variants` mit passenden Query-Parametern geprüft; ohne Treffer fällt der Server auf die Hauptroute zurück.
