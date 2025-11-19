@@ -1,10 +1,16 @@
 {
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "response_flags": ["example-env"],
   "routes": [
     {
       "method": "GET",
       "path": "/users",
       "description": "Returns a list of demo users.",
       "status": 200,
+      "response_flags": ["users-base"],
       "body": {
         "users": [
           { "id": 1, "name": "Ada" },
@@ -18,6 +24,7 @@
             "team": "platform",
             "active": "true"
           },
+          "response_flags": ["users-filtered"],
           "body": {
             "users": [
               { "id": 42, "name": "Grace" }
@@ -29,6 +36,8 @@
           "query": {
             "team": "support"
           },
+          "request_flags": ["beta-list"],
+          "response_flags": ["users-beta"],
           "body": {
             "users": []
           }

@@ -1,170 +1,178 @@
 # API Faker
 
-Eine kleine Rust-Anwendung, die HTTP-Endpunkte aus einer JSON-Datei simuliert. Ideal, um Frontends oder Integrationen zu entwickeln, ohne auf echte Backends warten zu müssen.
+API Faker is a lightweight Rust application that serves HTTP endpoints from a JSON configuration file. It is ideal for frontend or integration work whenever the real backend is still under construction.
 
 ## Features
 
-- Beliebige HTTP-Methoden (GET, POST, PUT, PATCH, DELETE, ...)
-- Frei definierbare Statuscodes, Header sowie JSON- oder Text-Bodies
-- Routen, die optional auf bestimmte Query-Parameter reagieren – inklusive Varianten für unterschiedliche Werte
-- Optionale künstliche Verzögerungen (`delay_ms`), um Ladezustände zu testen
-- Health-Check unter `GET /__health` und Auflistung aller konfigurierten Routen unter `GET /__routes`
-- Fehlervarianten, die sich gezielt über `?__error=name` oder den Header `x-api-faker-error: name` erzwingen lassen
-- Automatisch generierte OpenAPI-Dokumentation unter `GET /__openapi.json` sowie ein fertiges Swagger UI unter `GET /__swagger`
+- Arbitrary HTTP methods (GET, POST, PUT, PATCH, DELETE, …)
+- Fully customizable status codes, headers, JSON bodies, and text bodies
+- Routes can react to specific query parameters, including dedicated variants for different values
+- Optional artificial delays (`delay_ms`) for simulating loading states
+- Built-in health check at `GET /__health` and a complete route overview at `GET /__routes`
+- Error variants triggered via `?__error=name` or the `x-api-faker-error: name` header
+- Auto-generated OpenAPI document at `GET /__openapi.json` plus an embedded Swagger UI at `GET /__swagger`
+- Permissive CORS configuration so local browsers can call the mock API without extra setup
+- Host and port can be configured via CLI flags or directly inside the JSON file
+- Request and response flags help you toggle variants and label responses without touching headers manually
 
-## Konfigurationsdatei
+## Configuration file
 
-Die Konfiguration liegt als JSON-Datei vor (Standard: `mock_endpoints.json`). Beispiel:
+The configuration lives in a JSON file (default: `mock_endpoints.json`). Example:
 
 ```json
 {
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "response_flags": ["example-env"],
   "routes": [
-    {
-      "method": "GET",
-      "path": "/users",
-      "description": "Returns a list of demo users.",
-      "status": 200,
-      "body": {
-        "users": [
-          { "id": 1, "name": "Ada" },
-          { "id": 2, "name": "Linus" }
+      {
+        "method": "GET",
+        "path": "/users",
+        "description": "Returns a list of demo users.",
+        "status": 200,
+        "response_flags": ["users-base"],
+        "body": {
+          "users": [
+            { "id": 1, "name": "Ada" },
+            { "id": 2, "name": "Linus" }
+          ]
+        },
+        "variants": [
+          {
+            "description": "Filtered list when ?team=platform&active=true",
+            "query": {
+              "team": "platform",
+              "active": "true"
+            },
+            "response_flags": ["users-filtered"],
+            "body": {
+              "users": [
+                { "id": 42, "name": "Grace" }
+              ]
+            }
+          },
+          {
+            "description": "Empty list for ?team=support",
+            "query": {
+              "team": "support"
+            },
+            "request_flags": ["beta-list"],
+            "response_flags": ["users-beta"],
+            "body": {
+              "users": []
+            }
+          }
+        ],
+        "error_variants": [
+          {
+            "name": "users-timeout",
+            "description": "Force a temporary outage via ?__error=users-timeout or header x-api-faker-error",
+            "status": 503,
+            "delay_ms": 1500,
+            "text_body": "upstream dependency unavailable"
+          }
         ]
-      },
-      "variants": [
-        {
-          "description": "Filtered list for ?team=platform&active=true",
-          "query": {
-            "team": "platform",
-            "active": "true"
-          },
-          "body": {
-            "users": [
-              { "id": 42, "name": "Grace" }
-            ]
-          }
-        },
-        {
-          "description": "Empty list for ?team=support",
-          "query": {
-            "team": "support"
-          },
-          "body": {
-            "users": []
-          }
-        },
-        {
-          "description": "Error when ?team=ops",
-          "query": {
-            "team": "ops"
-          },
-          "status": 503,
-          "text_body": "team backend currently unavailable"
-        }
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/users",
-      "description": "Pretend to create a new user.",
-      "status": 201,
-      "body": {
-        "id": 999,
-        "message": "User created"
       }
-    },
-    {
-      "method": "GET",
-      "path": "/reports/slow",
-      "description": "Simulates a slow endpoint for testing loading states.",
-      "status": 200,
-      "delay_ms": 1200,
-      "body": {
-        "status": "still crunching numbers"
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/jobs/42",
-      "description": "Returns a simple confirmation as plain text.",
-      "status": 202,
-      "text_body": "Job 42 scheduled for deletion"
-    }
-  ]
+    ]
 }
 ```
 
-### Routenfelder
+### Server settings
 
-| Feld             | Typ               | Beschreibung                                                              |
-| ---------------- | ----------------- | ------------------------------------------------------------------------- |
-| `method`         | String            | HTTP-Methode (z. B. `GET`, `POST`, …)                                     |
-| `path`           | String            | Vollständiger Pfad, der exakt gematcht wird                               |
-| `status`         | Zahl (optional)   | HTTP-Statuscode (Default `200`)                                           |
-| `headers`        | Objekt (optional) | Key-Value-Paare für zusätzliche Header                                    |
-| `body`           | JSON (optional)   | Beliebiger JSON-Body                                                      |
-| `text_body`      | String (optional) | Plain-Text-Antwort (z. B. für einfache Meldungen)                         |
-| `query`          | Objekt (optional) | Key-Value-Paare, die als Query-Parameter verlangt sind                    |
-| `delay_ms`       | Zahl (optional)   | Verzögerung in Millisekunden vor dem Antworten                            |
-| `variants`       | Array (optional)  | Liste von Varianten mit eigenen Overrides                                 |
-| `error_variants` | Array (optional)  | Benannte Fehlervarianten, die über `__error` oder Header aktiviert werden |
-| `description`    | String (optional) | Freitext-Beschreibung; erscheint in `GET /__routes`                       |
+  The optional `server` block controls which interface and port the mock server binds to:
 
-Jede normale Variante kann diese Felder überschreiben (alle optional, sonst erbt sie den Wert der Hauptroute): `query`, `headers`, `body`, `text_body`, `status`, `delay_ms`, `description`.
+  | Field  | Type   | Description                                            |
+  | ------ | ------ | ------------------------------------------------------ |
+  | `host` | String | Hostname or IP address, e.g., `127.0.0.1` or `0.0.0.0` |
+  | `port` | Number | TCP port (for example `8080`)                          |
 
-### Fehlervarianten
+  CLI flags (`--host`, `-p/--port`) always win. If you omit them, API Faker reads the values from the configuration file and ultimately falls back to `127.0.0.1:8080`.
 
-Mit `error_variants` lassen sich gezielt Fehlerfälle triggern, ohne die realen Query-Parameter der Route zu verändern. Jede Fehlervariante benötigt ein eindeutiges `name`-Feld und kann optional dieselben Felder wie die Hauptroute überschreiben (`headers`, `body`, `text_body`, `status`, `delay_ms`, `description`).
+### Route fields
 
-Aktivierungsmöglichkeiten:
+  | Field            | Type              | Description                                                          |
+  | ---------------- | ----------------- | -------------------------------------------------------------------- |
+  | `method`         | String            | HTTP method (e.g., `GET`, `POST`, …)                                 |
+  | `path`           | String            | Path segment that must match exactly                                 |
+  | `status`         | Number (optional) | HTTP status code (default `200`)                                     |
+  | `headers`        | Object (optional) | Additional headers (name → value)                                    |
+  | `body`           | JSON (optional)   | Arbitrary JSON response body                                         |
+  | `text_body`      | String (optional) | Plain-text response body                                             |
+  | `query`          | Object (optional) | Required query parameters                                            |
+  | `request_flags`  | Array (optional)  | Flags the request must include (`__flags` parameter or header)       |
+  | `response_flags` | Array (optional)  | Flags automatically added to the `x-api-faker-flags` response header |
+  | `delay_ms`       | Number (optional) | Artificial delay in milliseconds before sending the response         |
+  | `variants`       | Array (optional)  | Variant list with overrides                                          |
+  | `error_variants` | Array (optional)  | Named error variants triggered via `__error` or header               |
+  | `description`    | String (optional) | Free-form description that also appears in `GET /__routes`           |
 
-- Query-Parameter `?__error=<name>`
-- HTTP-Header `x-api-faker-error: <name>`
+  Each variant can override the same fields (all optional). Non-specified values fall back to the base route.
 
-Passt der Name, hat die Fehlervariante Vorrang vor allen anderen Varianten. In `GET /__routes` taucht sie mit ihrem `error_trigger` auf, damit ersichtlich bleibt, wie sie ausgelöst wird.
+### Flags
 
-## Nutzung
+  Flags can be configured globally (`response_flags` at the root), per route, and per variant or error variant.
 
-### Voraussetzungen
+  1. **Request flags** determine whether a route or variant matches. A request can send flags via the `__flags` query parameter (repeat it or comma-separate values) or via the `x-api-faker-flags` header. Every expected flag must be present.
+  2. **Response flags** are automatically appended to the `x-api-faker-flags` header of the response. Values from global configuration, the route, and the current variant are merged (duplicates removed, order preserved).
+
+  This makes it easy to simulate feature toggles: send `x-api-faker-flags: beta-users`, return a different payload, and expose the active flags in the response headers.
+
+### Error variants
+
+  `error_variants` let you simulate failure scenarios without altering query parameters. Each error variant needs a unique `name` and can optionally override the same fields as the base route (`headers`, `body`, `text_body`, `status`, `delay_ms`, `description`).
+
+  Trigger options:
+
+- Query parameter `?__error=<name>`
+- HTTP header `x-api-faker-error: <name>`
+
+  When the name matches, the error variant takes precedence over every other variant. The `GET /__routes` endpoint lists each error trigger so you can see how to activate it.
+
+## Usage
+
+### Requirements
 
 - Rust 1.84+ (Edition 2024)
 
-### Lokaler Start
+### Local start
 
-```bash
-cargo run -- --config mock_endpoints.json --host 0.0.0.0 --port 8080
-```
+  ```bash
+  cargo run -- --config mock_endpoints.json --host 0.0.0.0 --port 8080
+  ```
 
-Danach stehen alle konfigurierten Endpunkte unter `http://host:port` bereit.
+  All configured endpoints will then be available under `http://host:port`.
 
-### Eigene Konfiguration
+### Custom configuration
 
-1. Kopiere `mock_endpoints.example.json` in `mock_endpoints.json` und passe die Routen an.
-2. Starte den Server default mit `cargo run` oder mit dem Pfad zu einer alternativen config: `cargo run -- --config my_routes.json`.
+  1. Copy `mock_endpoints.example.json` to `mock_endpoints.json` and adjust the routes.
+  2. Start the server with `cargo run` (default config) or point to a different file via `cargo run -- --config my_routes.json`.
 
 ### Swagger & OpenAPI
 
-- `GET /__openapi.json` liefert jederzeit die aktuell aus der Konfiguration generierte OpenAPI-3.1-Datei (inkl. Vendor-Extension `x-api-faker` mit Varianten/Fehlern).
-- `GET /__swagger` stellt ein eingebautes Swagger UI bereit, das automatisch auf diese Datei verweist – praktischerweise ohne weitere Tools oder Konfiguration.
-- Beide Endpunkte aktualisieren sich unmittelbar, sobald du die JSON-Konfiguration änderst und den Server erneut startest.
+- `GET /__openapi.json` always returns the generated OpenAPI 3.1 document (including the `x-api-faker` vendor extension with variants/errors/flags).
+- `GET /__swagger` serves an embedded Swagger UI that automatically points to that document.
+- Both endpoints refresh instantly whenever you restart the server with a new JSON configuration.
 
 ## CI/CD
 
-| Workflow | Datei                           | Trigger                                | Zweck                                                                                                                                                                                            |
-| -------- | ------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Tests    | `.github/workflows/test.yml`    | `push`/`pull_request` auf `main`       | Führt `cargo fmt --check`, `cargo clippy` (mit `-D warnings`) und `cargo test` aus. Nutzt `dtolnay/rust-toolchain@stable` und `Swatinem/rust-cache@v2`.                                          |
-| Build    | `.github/workflows/build.yml`   | `push` auf `main`, `workflow_dispatch` | Erstellt ein Release-Binary (`cargo build --release --locked`) für Linux, verpackt es als `api-faker-linux-x86_64.tar.gz` und lädt es als Artefakt hoch.                                         |
-| Release  | `.github/workflows/release.yml` | Tags `v*`, `workflow_dispatch`         | Baut Release-Artefakte für Linux, macOS und Windows, lädt sie als Artefakte hoch und veröffentlicht sie automatisch über `softprops/action-gh-release` inklusive auto-generierter Release Notes. |
+  | Workflow | File                            | Trigger                               | Purpose                                                                                                                                                |
+  | -------- | ------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | Tests    | `.github/workflows/test.yml`    | `push` / `pull_request` on `main`     | Runs `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo test`. Uses `dtolnay/rust-toolchain@stable` plus `Swatinem/rust-cache@v2`.            |
+  | Build    | `.github/workflows/build.yml`   | `push` on `main`, `workflow_dispatch` | Produces a release binary (`cargo build --release --locked`) for Linux, packages it as `api-faker-linux-x86_64.tar.gz`, and uploads it as an artifact. |
+  | Release  | `.github/workflows/release.yml` | Tags `v*`, `workflow_dispatch`        | Builds release artifacts for Linux, macOS, and Windows, uploads them, and publishes via `softprops/action-gh-release` with auto-generated notes.       |
 
-Alle Workflows geben ihre Logs als Artefakte aus und nutzen die GitHub Actions Cache-Mechanik, damit Folge-Läufe schneller durchlaufen.
+  All workflows store their logs as artifacts and tap into the GitHub Actions cache for faster follow-up runs.
 
-## Tipps
+## Tips
 
-- Mehrere Routen können denselben Pfad mit unterschiedlichen Methoden verwenden.
-- Doppelte Kombinationen aus Methode + Pfad überschreiben sich; im Log erscheint ein Hinweis.
-- Über `__routes` lässt sich schnell prüfen, welche Mocks aktuell aktiv sind.
+- You can define multiple routes with the same path as long as the method differs.
+- Duplicate method+path combinations overwrite the previous route; a warning is logged.
+- `GET /__routes` quickly shows which mocks are currently active, including query expectations, flags, and error triggers.
 
-> Hinweise:
->
-> - Pro Route kann entweder `body` **oder** `text_body` gesetzt werden. Bei Textantworten wird automatisch `text/plain; charset=utf-8` gesetzt, sofern kein eigener `Content-Type` angegeben ist.
-> - Wenn mehrere Routen denselben Pfad besitzen, werden zuerst diejenigen mit passenden `query`-Parametern geprüft, bevor eine generische Route greift.
-> - Innerhalb einer Route werden `variants` mit passenden Query-Parametern geprüft; ohne Treffer fällt der Server auf die Hauptroute zurück.
+  > Notes:
+  >
+  > - Each route may provide either `body` **or** `text_body`. When serving text, the default `Content-Type` is `text/plain; charset=utf-8` unless you override it.
+  > - When multiple routes share a path, the ones with matching `query` constraints are evaluated first before falling back to a generic route.
+  > - Within a route, `variants` are checked for matching query parameters and request flags; if none apply, the server falls back to the base route.

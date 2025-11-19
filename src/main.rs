@@ -16,17 +16,17 @@ use crate::server::{AppState, build_router};
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Serve fake API endpoints from a JSON file.")]
 struct Cli {
-    /// Pfad zur Konfigurationsdatei mit den Fake-Endpunkten
+    /// Path to the configuration file containing mock endpoints
     #[arg(short, long, default_value = "mock_endpoints.json")]
     config: PathBuf,
 
-    /// Host-Adresse, auf der der Server lauscht
-    #[arg(long, default_value = "127.0.0.1")]
-    host: String,
+    /// Host interface the server should bind to
+    #[arg(long)]
+    host: Option<String>,
 
-    /// Port, auf dem der Server lauscht
-    #[arg(short, long, default_value_t = 8080)]
-    port: u16,
+    /// Port the server should listen on
+    #[arg(short, long)]
+    port: Option<u16>,
 }
 
 #[tokio::main]
@@ -36,21 +36,28 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config = Config::from_file(&cli.config).await?;
+    let server_settings = config.server.clone();
     let state = AppState::try_from(config)?;
     let router = build_router(state);
 
-    let addr: SocketAddr = format!("{}:{}", cli.host, cli.port)
-        .parse()
-        .context("Ungültige Host/Port-Kombination")?;
+    let host = cli
+        .host
+        .or_else(|| server_settings.host.clone())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let port = cli.port.or(server_settings.port).unwrap_or(8080);
 
-    info!(%addr, "Mock API läuft");
+    let addr: SocketAddr = format!("{}:{}", host, port)
+        .parse()
+        .context("Invalid host/port combination")?;
+
+    info!(%addr, "Mock API running");
 
     let listener = TcpListener::bind(addr)
         .await
-        .context("Konnte Socket nicht binden")?;
+        .context("Failed to bind socket")?;
     axum::serve(listener, router)
         .await
-        .context("Serverlauf fehlgeschlagen")?;
+        .context("Server execution failed")?;
 
     Ok(())
 }
