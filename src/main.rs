@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{Request, State},
     http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
@@ -16,7 +16,7 @@ use axum::{
     Json, Router,
 };
 use clap::Parser;
-use serde::{de::Error as _, Deserialize, Serialize};
+use serde::{de::Error as _, ser::Serializer, Deserialize, Serialize};
 use serde_json::json;
 use tokio::{fs, net::TcpListener, time::sleep};
 use tracing::{info, warn};
@@ -85,7 +85,7 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn list_routes(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.summaries.as_ref().clone())
+    Json(RouteSummariesResponse(Arc::clone(&state.summaries)))
 }
 
 async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
@@ -100,14 +100,8 @@ async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
         let query_map = request.uri().query().map(parse_query_map);
         let matching_route = candidates
             .iter()
-            .filter(|candidate| candidate.query_params.is_some())
-            .find(|candidate| candidate.matches_query(query_map.as_ref()))
-            .or_else(|| {
-                candidates
-                    .iter()
-                    .filter(|candidate| candidate.query_params.is_none())
-                    .find(|candidate| candidate.matches_query(query_map.as_ref()))
-            });
+            .filter(|candidate| candidate.matches_query(query_map.as_ref()))
+            .max_by_key(|candidate| candidate.specificity_rank());
 
         if let Some(route) = matching_route {
             if let Some(delay) = route.delay {
@@ -122,7 +116,7 @@ async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
             let body = route
                 .body
                 .as_ref()
-                .map(|bytes| Body::from(bytes.as_ref().clone()))
+                .map(|bytes| Body::from(bytes.clone()))
                 .unwrap_or_else(Body::empty);
 
             return builder
@@ -288,7 +282,7 @@ impl TryFrom<Config> for AppState {
 struct RouteRuntime {
     status: StatusCode,
     headers: Arc<Vec<(HeaderName, HeaderValue)>>,
-    body: Option<Arc<Vec<u8>>>,
+    body: Option<Bytes>,
     delay: Option<Duration>,
     query_params: Option<Arc<Vec<(String, String)>>>,
 }
@@ -323,29 +317,62 @@ impl RouteRuntime {
             headers.push((header_name, header_value));
         }
 
-        let body_value = variant
-            .and_then(|v| v.body.as_ref())
-            .or_else(|| route.body.as_ref());
-        let text_value = variant
-            .and_then(|v| v.text_body.as_ref())
-            .or_else(|| route.text_body.as_ref());
-
-        let (body_bytes, default_ct): (Option<Vec<u8>>, Option<&'static str>) = match (body_value, text_value) {
-            (Some(_), Some(_)) => bail!(
+        if route.body.is_some() && route.text_body.is_some() {
+            bail!(
                 "Route {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
                 route.method,
                 route.path
-            ),
-            (Some(body), None) => {
-                let bytes = serde_json::to_vec(body)
-                    .context("Antwort-Body konnte nicht serialisiert werden")?;
-                (Some(bytes), Some("application/json"))
+            );
+        }
+
+        if let Some(variant_cfg) = variant {
+            if variant_cfg.body.is_some() && variant_cfg.text_body.is_some() {
+                bail!(
+                    "Variante von {} {} definiert sowohl 'body' als auch 'text_body'. Bitte nur eines verwenden.",
+                    route.method,
+                    route.path
+                );
             }
-            (None, Some(text)) => (Some(text.as_bytes().to_vec()), Some("text/plain; charset=utf-8")),
-            (None, None) => (None, None),
+        }
+
+        enum BodySpec<'a> {
+            Json(&'a serde_json::Value),
+            Text(&'a str),
+            None,
+        }
+
+        let body_spec = if let Some(variant_cfg) = variant {
+            if let Some(body) = variant_cfg.body.as_ref() {
+                BodySpec::Json(body)
+            } else if let Some(text) = variant_cfg.text_body.as_ref() {
+                BodySpec::Text(text)
+            } else if let Some(body) = route.body.as_ref() {
+                BodySpec::Json(body)
+            } else if let Some(text) = route.text_body.as_ref() {
+                BodySpec::Text(text)
+            } else {
+                BodySpec::None
+            }
+        } else if let Some(body) = route.body.as_ref() {
+            BodySpec::Json(body)
+        } else if let Some(text) = route.text_body.as_ref() {
+            BodySpec::Text(text)
+        } else {
+            BodySpec::None
         };
 
-        let body_bytes = body_bytes.map(|bytes| Arc::new(bytes));
+        let (body_bytes, default_ct): (Option<Bytes>, Option<&'static str>) = match body_spec {
+            BodySpec::Json(body) => {
+                let bytes = serde_json::to_vec(body)
+                    .context("Antwort-Body konnte nicht serialisiert werden")?;
+                (Some(Bytes::from(bytes)), Some("application/json"))
+            }
+            BodySpec::Text(text) => {
+                let bytes = Bytes::from(text.to_owned());
+                (Some(bytes), Some("text/plain; charset=utf-8"))
+            }
+            BodySpec::None => (None, None),
+        };
 
         if body_bytes.is_some() && !has_content_type {
             if let Some(default) = default_ct {
@@ -402,6 +429,10 @@ impl RouteRuntime {
             }
         }
     }
+
+    fn specificity_rank(&self) -> u8 {
+        if self.query_params.is_some() { 1 } else { 0 }
+    }
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
@@ -417,6 +448,18 @@ struct RouteSummary {
     status: u16,
     description: Option<String>,
     query: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Clone)]
+struct RouteSummariesResponse(Arc<Vec<RouteSummary>>);
+
+impl Serialize for RouteSummariesResponse {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
 }
 
 fn default_status() -> u16 {
@@ -438,4 +481,44 @@ fn parse_query_map(raw: &str) -> BTreeMap<String, Vec<String>> {
             acc.entry(key).or_default().push(value);
             acc
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variant_text_body_overrides_base_json() {
+        let route = RouteConfig {
+            method: Method::GET,
+            path: "/users".into(),
+            status: 200,
+            headers: BTreeMap::new(),
+            body: Some(json!({"foo": "bar"})),
+            text_body: None,
+            query: BTreeMap::new(),
+            delay_ms: None,
+            description: None,
+            variants: Vec::new(),
+        };
+
+        let variant = RouteVariantConfig {
+            query: BTreeMap::new(),
+            headers: BTreeMap::new(),
+            body: None,
+            text_body: Some("hello world".into()),
+            status: None,
+            delay_ms: None,
+            description: None,
+        };
+
+        let runtime = RouteRuntime::from_config(&route, Some(&variant)).expect("runtime");
+        let body = runtime.body.clone().expect("body");
+        assert_eq!(body, Bytes::from_static(b"hello world"));
+
+        assert!(runtime
+            .headers
+            .iter()
+            .any(|(name, value)| name == &CONTENT_TYPE && value == "text/plain; charset=utf-8"));
+    }
 }
