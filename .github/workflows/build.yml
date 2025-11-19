@@ -1,0 +1,39 @@
+name: CI - Build
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-release-binary:
+    name: Build release binary
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo folders
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package artifact
+        run: |
+          mkdir -p dist
+          cp target/release/api-faker dist/
+          tar -C dist -czf api-faker-linux-x86_64.tar.gz api-faker
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-faker-linux-x86_64
+          path: api-faker-linux-x86_64.tar.gz

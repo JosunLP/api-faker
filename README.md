@@ -10,6 +10,7 @@ Eine kleine Rust-Anwendung, die HTTP-Endpunkte aus einer JSON-Datei simuliert. I
 - Optionale künstliche Verzögerungen (`delay_ms`), um Ladezustände zu testen
 - Health-Check unter `GET /__health` und Auflistung aller konfigurierten Routen unter `GET /__routes`
 - Fehlervarianten, die sich gezielt über `?__error=name` oder den Header `x-api-faker-error: name` erzwingen lassen
+- Automatisch generierte OpenAPI-Dokumentation unter `GET /__openapi.json` sowie ein fertiges Swagger UI unter `GET /__swagger`
 
 ## Konfigurationsdatei
 
@@ -137,8 +138,24 @@ Danach stehen alle konfigurierten Endpunkte unter `http://host:port` bereit.
 
 ### Eigene Konfiguration
 
-1. Kopiere `mock_endpoints.json` und passe die Routen an.
-2. Starte den Server mit dem neuen Pfad: `cargo run -- --config my_routes.json`.
+1. Kopiere `mock_endpoints.example.json` in `mock_endpoints.json` und passe die Routen an.
+2. Starte den Server default mit `cargo run` oder mit dem Pfad zu einer alternativen config: `cargo run -- --config my_routes.json`.
+
+### Swagger & OpenAPI
+
+- `GET /__openapi.json` liefert jederzeit die aktuell aus der Konfiguration generierte OpenAPI-3.1-Datei (inkl. Vendor-Extension `x-api-faker` mit Varianten/Fehlern).
+- `GET /__swagger` stellt ein eingebautes Swagger UI bereit, das automatisch auf diese Datei verweist – praktischerweise ohne weitere Tools oder Konfiguration.
+- Beide Endpunkte aktualisieren sich unmittelbar, sobald du die JSON-Konfiguration änderst und den Server erneut startest.
+
+## CI/CD
+
+| Workflow | Datei                           | Trigger                                | Zweck                                                                                                                                                                                            |
+| -------- | ------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tests    | `.github/workflows/test.yml`    | `push`/`pull_request` auf `main`       | Führt `cargo fmt --check`, `cargo clippy` (mit `-D warnings`) und `cargo test` aus. Nutzt `dtolnay/rust-toolchain@stable` und `Swatinem/rust-cache@v2`.                                          |
+| Build    | `.github/workflows/build.yml`   | `push` auf `main`, `workflow_dispatch` | Erstellt ein Release-Binary (`cargo build --release --locked`) für Linux, verpackt es als `api-faker-linux-x86_64.tar.gz` und lädt es als Artefakt hoch.                                         |
+| Release  | `.github/workflows/release.yml` | Tags `v*`, `workflow_dispatch`         | Baut Release-Artefakte für Linux, macOS und Windows, lädt sie als Artefakte hoch und veröffentlicht sie automatisch über `softprops/action-gh-release` inklusive auto-generierter Release Notes. |
+
+Alle Workflows geben ihre Logs als Artefakte aus und nutzen die GitHub Actions Cache-Mechanik, damit Folge-Läufe schneller durchlaufen.
 
 ## Tipps
 

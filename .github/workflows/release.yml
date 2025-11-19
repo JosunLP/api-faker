@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build per platform
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            archive: api-faker-linux-x86_64.tar.gz
+            artifact: api-faker-linux-x86_64
+            binary: target/release/api-faker
+          - os: macos-latest
+            archive: api-faker-macos-x86_64.tar.gz
+            artifact: api-faker-macos-x86_64
+            binary: target/release/api-faker
+          - os: windows-latest
+            archive: api-faker-windows-x86_64.zip
+            artifact: api-faker-windows-x86_64
+            binary: target/release/api-faker.exe
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo folders
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package artifact (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          BINARY_PATH: ${{ matrix.binary }}
+        run: |
+          mkdir -p package
+          cp "$BINARY_PATH" package/api-faker
+          tar -C package -czf "$ARCHIVE" api-faker
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          BINARY_PATH: ${{ matrix.binary }}
+        run: |
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          Copy-Item $Env:BINARY_PATH package/api-faker.exe -Force
+          Compress-Archive -Path package/api-faker.exe -DestinationPath $Env:ARCHIVE -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive }}
+
+  publish:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
