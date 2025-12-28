@@ -88,6 +88,11 @@ pub async fn perform_update() -> Result<()> {
     );
 
     let response = client.get(&url).send().await?;
+    
+    if !response.status().is_success() {
+        bail!("GitHub API request failed with status: {}", response.status());
+    }
+    
     let release: GitHubRelease = response.json().await?;
 
     let latest_version = release.tag_name.trim_start_matches('v');
@@ -217,8 +222,12 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
 
     info!("Installing to {}...", install_dir.display());
 
-    // Create temporary directory
-    let temp_dir = env::temp_dir().join(format!("api-faker-update-{}", std::process::id()));
+    // Create temporary directory with random component for security
+    let random_suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temp_dir = env::temp_dir().join(format!("api-faker-update-{}", random_suffix));
     fs::create_dir_all(&temp_dir)?;
 
     // Write archive to temp directory
@@ -259,11 +268,32 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
     {
         // On Windows, rename the old binary and copy the new one
         let backup_path = target_path.with_extension("exe.old");
+        
+        // Remove old backup if it exists
         if backup_path.exists() {
             fs::remove_file(&backup_path)?;
         }
-        fs::rename(&target_path, &backup_path)?;
-        fs::copy(&extracted_binary, &target_path)?;
+        
+        // Rename current to backup, copy new, then clean up backup
+        if target_path.exists() {
+            fs::rename(&target_path, &backup_path)?;
+        }
+        
+        match fs::copy(&extracted_binary, &target_path) {
+            Ok(_) => {
+                // Successfully copied, remove backup
+                if backup_path.exists() {
+                    let _ = fs::remove_file(&backup_path); // Ignore errors on cleanup
+                }
+            }
+            Err(e) => {
+                // Failed to copy, restore backup
+                if backup_path.exists() {
+                    let _ = fs::rename(&backup_path, &target_path);
+                }
+                return Err(e.into());
+            }
+        }
     }
 
     // Clean up
@@ -274,10 +304,13 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
 
 fn extract_archive(archive_path: &PathBuf, output_dir: &PathBuf) -> Result<()> {
     let file = fs::File::open(archive_path)?;
-    let filename = archive_path.to_string_lossy();
+    let filename = archive_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("Invalid archive filename")?;
 
-    if filename.ends_with(".tar.gz") {
-        // Handle .tar.gz
+    if filename.ends_with(".tar.gz") || filename.ends_with(".tgz") {
+        // Handle .tar.gz and .tgz
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
         archive.unpack(output_dir)?;

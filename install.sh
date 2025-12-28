@@ -187,13 +187,19 @@ download_release() {
 install_binary() {
     log_info "Installing to $INSTALL_DIR..."
     
+    # Determine the target filename (preserve .exe on Windows)
+    TARGET_NAME="api-faker"
+    if [ "$PLATFORM" = "windows" ]; then
+        TARGET_NAME="api-faker.exe"
+    fi
+    
     # Check if we need sudo
     if [ ! -w "$INSTALL_DIR" ]; then
         if command -v sudo >/dev/null 2>&1; then
             log_warn "Root privileges required for installation to $INSTALL_DIR"
             sudo mkdir -p "$INSTALL_DIR"
-            sudo cp "$BINARY_PATH" "$INSTALL_DIR/api-faker"
-            sudo chmod +x "$INSTALL_DIR/api-faker"
+            sudo cp "$BINARY_PATH" "$INSTALL_DIR/$TARGET_NAME"
+            sudo chmod +x "$INSTALL_DIR/$TARGET_NAME"
         else
             log_error "Cannot write to $INSTALL_DIR and sudo not available"
             log_info "Try setting INSTALL_DIR to a writable location:"
@@ -202,13 +208,13 @@ install_binary() {
         fi
     else
         mkdir -p "$INSTALL_DIR"
-        cp "$BINARY_PATH" "$INSTALL_DIR/api-faker"
-        chmod +x "$INSTALL_DIR/api-faker"
+        cp "$BINARY_PATH" "$INSTALL_DIR/$TARGET_NAME"
+        chmod +x "$INSTALL_DIR/$TARGET_NAME"
     fi
     
     log_info "Installation complete!"
     log_info ""
-    log_info "api-faker $VERSION has been installed to $INSTALL_DIR/api-faker"
+    log_info "api-faker $VERSION has been installed to $INSTALL_DIR/$TARGET_NAME"
     log_info ""
     log_info "Make sure $INSTALL_DIR is in your PATH."
     log_info "You can now run: api-faker --help"
