@@ -8,11 +8,14 @@
 # 1. Create a repository named homebrew-tap
 # 2. Add this formula to Formula/api-faker.rb
 # 3. Users install with: brew install josunlp/tap/api-faker
+#
+# NOTE: Update version, url, and sha256 for each release
+# TODO: Consider automating this with GitHub Actions
 
 class ApiFaker < Formula
   desc "Lightweight Rust application that serves HTTP endpoints from a JSON configuration file"
   homepage "https://github.com/JosunLP/api-faker"
-  version "1.2.0"  # UPDATE THIS VERSION
+  version "1.2.0"  # UPDATE THIS VERSION FOR EACH RELEASE
   license "MIT"
 
   if OS.mac?

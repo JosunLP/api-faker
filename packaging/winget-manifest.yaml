@@ -3,9 +3,12 @@
 # This is a template for creating a winget package manifest.
 # To submit to winget, follow the instructions at:
 # https://github.com/microsoft/winget-pkgs
+#
+# NOTE: Update PackageVersion, InstallerUrl, and InstallerSha256 for each release
+# TODO: Consider automating this with GitHub Actions
 
 PackageIdentifier: JosunLP.APIFaker
-PackageVersion: 1.2.0  # UPDATE THIS VERSION
+PackageVersion: 1.2.0  # UPDATE THIS VERSION FOR EACH RELEASE
 PackageLocale: en-US
 Publisher: JosunLP
 PublisherUrl: https://github.com/JosunLP

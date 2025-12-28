@@ -226,7 +226,7 @@ The updater:
 | `--port-max`, `API_FAKER_PORT_MAX` | Highest port that the fallback logic may probe (default `65535`).                                       |
 | `--log-level`, `API_FAKER_LOG`     | Override tracing verbosity for both API Faker and Axum (`error`, `warn`, `info`, `debug`, `trace`).     |
 | `--dry-run`                        | Validate the configuration file and exit without binding a socket.                                      |
-| `-c, --check`                      | Check for updates without installing.                                                                   |
+| `--check`                          | Check for updates without installing.                                                                   |
 | `--update`                         | Update to the latest version.                                                                           |
 
 Example: `api-faker --config qa.json --host 0.0.0.0 --port 5000 --port-max 5100 --log-level debug` will bind to the first free port in `[5000, 5100]` and emit verbose diagnostics. Pair `--dry-run` with CI to ensure configuration changes stay valid without spinning up the server.

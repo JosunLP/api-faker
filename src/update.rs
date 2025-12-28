@@ -59,31 +59,19 @@ pub async fn check_for_updates() -> Result<Option<String>> {
     }
 }
 
-/// Compare version strings (simple comparison)
+/// Compare version strings using proper semantic versioning
 fn version_is_newer(latest: &str, current: &str) -> bool {
-    // Simple lexicographic comparison for semantic versions
-    // For production, you might want to use a semver crate
-    let latest_parts: Vec<u32> = latest
-        .split('.')
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    let current_parts: Vec<u32> = current
-        .split('.')
-        .filter_map(|s| s.parse().ok())
-        .collect();
+    use semver::Version;
 
-    for i in 0..latest_parts.len().max(current_parts.len()) {
-        let latest_part = latest_parts.get(i).copied().unwrap_or(0);
-        let current_part = current_parts.get(i).copied().unwrap_or(0);
+    // Parse versions, returning false if either is invalid
+    let Ok(latest_ver) = Version::parse(latest) else {
+        return false;
+    };
+    let Ok(current_ver) = Version::parse(current) else {
+        return false;
+    };
 
-        if latest_part > current_part {
-            return true;
-        } else if latest_part < current_part {
-            return false;
-        }
-    }
-
-    false
+    latest_ver > current_ver
 }
 
 /// Perform the update by downloading and replacing the current binary
@@ -167,6 +155,7 @@ fn get_platform_archive_name() -> Result<String> {
     let os = env::consts::OS;
     let arch = env::consts::ARCH;
 
+    // env::consts::OS returns: "linux", "macos", "windows", etc.
     let (platform, ext) = match os {
         "linux" => ("linux", "tar.gz"),
         "macos" => ("macos", "tar.gz"),
@@ -285,18 +274,19 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
 
 fn extract_archive(archive_path: &PathBuf, output_dir: &PathBuf) -> Result<()> {
     let file = fs::File::open(archive_path)?;
+    let filename = archive_path.to_string_lossy();
 
-    if archive_path.extension().and_then(|s| s.to_str()) == Some("gz") {
+    if filename.ends_with(".tar.gz") {
         // Handle .tar.gz
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
         archive.unpack(output_dir)?;
-    } else if archive_path.extension().and_then(|s| s.to_str()) == Some("zip") {
+    } else if filename.ends_with(".zip") {
         // Handle .zip
         let mut archive = zip::ZipArchive::new(file)?;
         archive.extract(output_dir)?;
     } else {
-        bail!("Unsupported archive format");
+        bail!("Unsupported archive format: {}", filename);
     }
 
     Ok(())
