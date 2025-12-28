@@ -55,6 +55,7 @@ jobs:
           mkdir -p package
           cp "$BINARY_PATH" package/api-faker
           tar -C package -czf "$ARCHIVE" api-faker
+          sha256sum "$ARCHIVE" >> checksums.txt
 
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
@@ -66,6 +67,14 @@ jobs:
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item $Env:BINARY_PATH package/api-faker.exe -Force
           Compress-Archive -Path package/api-faker.exe -DestinationPath $Env:ARCHIVE -Force
+          $hash = (Get-FileHash -Path $Env:ARCHIVE -Algorithm SHA256).Hash.ToLower()
+          "$hash  $Env:ARCHIVE" | Out-File -Append -Encoding ASCII checksums.txt
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-checksums
+          path: checksums.txt
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -86,6 +95,17 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Merge checksums
+        run: |
+          cd dist
+          cat *-checksums/checksums.txt > checksums.txt 2>/dev/null || echo "No checksums found"
+          rm -rf *-checksums
+          echo "Final checksums:"
+          cat checksums.txt
+
+      - name: Copy install script to dist
+        run: cp install.sh dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

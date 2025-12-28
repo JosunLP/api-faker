@@ -1,0 +1,52 @@
+# API Faker Winget Manifest Template
+# 
+# This is a template for creating a winget package manifest.
+# To submit to winget, follow the instructions at:
+# https://github.com/microsoft/winget-pkgs
+
+PackageIdentifier: JosunLP.APIFaker
+PackageVersion: 1.2.0  # UPDATE THIS VERSION
+PackageLocale: en-US
+Publisher: JosunLP
+PublisherUrl: https://github.com/JosunLP
+PublisherSupportUrl: https://github.com/JosunLP/api-faker/issues
+Author: JosunLP
+PackageName: API Faker
+PackageUrl: https://github.com/JosunLP/api-faker
+License: MIT
+LicenseUrl: https://github.com/JosunLP/api-faker/blob/main/LICENSE
+ShortDescription: A lightweight Rust application that serves HTTP endpoints from a JSON configuration file
+Description: |
+  API Faker is a lightweight Rust application that serves HTTP endpoints from a JSON configuration file.
+  It is ideal for frontend or integration work whenever the real backend is still under construction.
+  
+  Features:
+  - Arbitrary HTTP methods (GET, POST, PUT, PATCH, DELETE, …)
+  - Fully customizable status codes, headers, JSON bodies, and text bodies
+  - Routes can react to specific query parameters
+  - Optional artificial delays for simulating loading states
+  - Built-in health check and route overview endpoints
+  - Auto-generated OpenAPI document with embedded Swagger UI
+  - Permissive CORS configuration
+Moniker: api-faker
+Tags:
+  - api
+  - mock
+  - faker
+  - testing
+  - development
+  - rest
+  - http
+  - server
+ManifestType: singleton
+ManifestVersion: 1.0.0
+
+# Installation details
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    InstallerUrl: https://github.com/JosunLP/api-faker/releases/download/v1.2.0/api-faker-windows-x86_64.zip  # UPDATE VERSION
+    InstallerSha256: <REPLACE_WITH_ACTUAL_SHA256>  # UPDATE THIS
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S

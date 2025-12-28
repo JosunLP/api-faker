@@ -133,14 +133,85 @@ The configuration lives in a JSON file (default: `mock_endpoints.json`). Example
 
 ## Usage
 
+### Installation
+
+#### Quick Install (Recommended)
+
+Download and run the installation script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JosunLP/api-faker/main/install.sh | sh
+```
+
+Or download and inspect first:
+```bash
+wget https://raw.githubusercontent.com/JosunLP/api-faker/main/install.sh
+chmod +x install.sh
+./install.sh
+```
+
+The script automatically:
+- Detects your platform (Linux, macOS, Windows/WSL)
+- Downloads the latest release
+- Verifies the checksum
+- Installs to `/usr/local/bin` (or custom location via `INSTALL_DIR`)
+
+**macOS users:** The binary is not code-signed. On first run, you may need to allow it in System Preferences > Security & Privacy, or run:
+```bash
+xattr -d com.apple.quarantine /usr/local/bin/api-faker
+```
+
+#### Manual Installation
+
+Download the appropriate binary for your platform from the [releases page](https://github.com/JosunLP/api-faker/releases):
+
+- **Linux**: `api-faker-linux-x86_64.tar.gz`
+- **macOS**: `api-faker-macos-x86_64.tar.gz`
+- **Windows**: `api-faker-windows-x86_64.zip`
+
+Extract and place the binary in your PATH.
+
+#### Build from Source
+
+```bash
+git clone https://github.com/JosunLP/api-faker.git
+cd api-faker
+cargo build --release
+```
+
+The binary will be in `target/release/api-faker`.
+
 ### Requirements
 
-- Rust 1.84+ (Edition 2024)
+- For binary installation: No dependencies required
+- For building from source: Rust 1.84+ (Edition 2024)
+
+### Updates
+
+API Faker includes built-in update functionality:
+
+```bash
+# Check for updates
+api-faker --check
+
+# Update to the latest version
+api-faker --update
+```
+
+The updater:
+- Fetches the latest release from GitHub
+- Verifies checksums for security
+- Automatically replaces the binary
 
 ### Local start
 
   ```bash
   cargo run -- --config mock_endpoints.json --host 0.0.0.0 --port 8080
+  ```
+
+  Or with the installed binary:
+  ```bash
+  api-faker --config mock_endpoints.json --host 0.0.0.0 --port 8080
   ```
 
   All configured endpoints will then be available under `http://host:port`.
@@ -155,8 +226,10 @@ The configuration lives in a JSON file (default: `mock_endpoints.json`). Example
 | `--port-max`, `API_FAKER_PORT_MAX` | Highest port that the fallback logic may probe (default `65535`).                                       |
 | `--log-level`, `API_FAKER_LOG`     | Override tracing verbosity for both API Faker and Axum (`error`, `warn`, `info`, `debug`, `trace`).     |
 | `--dry-run`                        | Validate the configuration file and exit without binding a socket.                                      |
+| `-c, --check`                      | Check for updates without installing.                                                                   |
+| `--update`                         | Update to the latest version.                                                                           |
 
-Example: `cargo run -- --config qa.json --host 0.0.0.0 --port 5000 --port-max 5100 --log-level debug` will bind to the first free port in `[5000, 5100]` and emit verbose diagnostics. Pair `--dry-run` with CI to ensure configuration changes stay valid without spinning up the server.
+Example: `api-faker --config qa.json --host 0.0.0.0 --port 5000 --port-max 5100 --log-level debug` will bind to the first free port in `[5000, 5100]` and emit verbose diagnostics. Pair `--dry-run` with CI to ensure configuration changes stay valid without spinning up the server.
 
 ### Custom configuration
 

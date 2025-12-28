@@ -1,0 +1,318 @@
+use anyhow::{Context, Result, bail};
+use serde::Deserialize;
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use tracing::{info, warn};
+
+const REPO_OWNER: &str = "JosunLP";
+const REPO_NAME: &str = "api-faker";
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    #[allow(dead_code)]
+    name: String,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// Check if a newer version is available
+pub async fn check_for_updates() -> Result<Option<String>> {
+    let client = reqwest::Client::builder()
+        .user_agent(format!("api-faker/{}", CURRENT_VERSION))
+        .build()?;
+
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/releases/latest",
+        REPO_OWNER, REPO_NAME
+    );
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .context("Failed to fetch latest release information")?;
+
+    if !response.status().is_success() {
+        bail!("GitHub API request failed with status: {}", response.status());
+    }
+
+    let release: GitHubRelease = response
+        .json()
+        .await
+        .context("Failed to parse release information")?;
+
+    let latest_version = release.tag_name.trim_start_matches('v');
+    let current_version = CURRENT_VERSION;
+
+    if version_is_newer(latest_version, current_version) {
+        Ok(Some(release.tag_name))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Compare version strings (simple comparison)
+fn version_is_newer(latest: &str, current: &str) -> bool {
+    // Simple lexicographic comparison for semantic versions
+    // For production, you might want to use a semver crate
+    let latest_parts: Vec<u32> = latest
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let current_parts: Vec<u32> = current
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    for i in 0..latest_parts.len().max(current_parts.len()) {
+        let latest_part = latest_parts.get(i).copied().unwrap_or(0);
+        let current_part = current_parts.get(i).copied().unwrap_or(0);
+
+        if latest_part > current_part {
+            return true;
+        } else if latest_part < current_part {
+            return false;
+        }
+    }
+
+    false
+}
+
+/// Perform the update by downloading and replacing the current binary
+pub async fn perform_update() -> Result<()> {
+    info!("Checking for updates...");
+
+    let client = reqwest::Client::builder()
+        .user_agent(format!("api-faker/{}", CURRENT_VERSION))
+        .build()?;
+
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/releases/latest",
+        REPO_OWNER, REPO_NAME
+    );
+
+    let response = client.get(&url).send().await?;
+    let release: GitHubRelease = response.json().await?;
+
+    let latest_version = release.tag_name.trim_start_matches('v');
+    let current_version = CURRENT_VERSION;
+
+    if !version_is_newer(latest_version, current_version) {
+        info!(
+            "Already running the latest version ({})",
+            CURRENT_VERSION
+        );
+        return Ok(());
+    }
+
+    info!(
+        "New version available: {} (current: {})",
+        release.tag_name, CURRENT_VERSION
+    );
+
+    // Determine the platform-specific archive name
+    let archive_name = get_platform_archive_name()?;
+    let checksums_name = "checksums.txt";
+
+    // Find the asset URLs
+    let archive_asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == archive_name)
+        .context(format!("Release asset not found: {}", archive_name))?;
+
+    let checksums_asset = release.assets.iter().find(|a| a.name == checksums_name);
+
+    info!("Downloading {}...", archive_name);
+    let archive_data = client
+        .get(&archive_asset.browser_download_url)
+        .send()
+        .await?
+        .bytes()
+        .await?;
+
+    // Verify checksum if available
+    if let Some(checksums_asset) = checksums_asset {
+        info!("Downloading checksums...");
+        let checksums_data = client
+            .get(&checksums_asset.browser_download_url)
+            .send()
+            .await?
+            .text()
+            .await?;
+
+        verify_checksum(&archive_data, &checksums_data, &archive_name)?;
+    } else {
+        warn!("Checksums file not available, skipping verification");
+    }
+
+    // Extract and install
+    install_update(&archive_data, &archive_name)?;
+
+    info!("Update completed successfully!");
+    info!("Please restart api-faker to use version {}", release.tag_name);
+
+    Ok(())
+}
+
+fn get_platform_archive_name() -> Result<String> {
+    let os = env::consts::OS;
+    let arch = env::consts::ARCH;
+
+    let (platform, ext) = match os {
+        "linux" => ("linux", "tar.gz"),
+        "macos" => ("macos", "tar.gz"),
+        "windows" => ("windows", "zip"),
+        _ => bail!("Unsupported platform: {}", os),
+    };
+
+    if arch != "x86_64" {
+        bail!("Unsupported architecture: {}", arch);
+    }
+
+    Ok(format!("api-faker-{}-{}.{}", platform, arch, ext))
+}
+
+fn verify_checksum(data: &[u8], checksums: &str, filename: &str) -> Result<()> {
+    use std::collections::HashMap;
+
+    // Parse checksums file
+    let mut checksums_map = HashMap::new();
+    for line in checksums.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            checksums_map.insert(parts[1], parts[0]);
+        }
+    }
+
+    let expected_hash = checksums_map
+        .get(filename)
+        .context(format!("Checksum not found for {}", filename))?;
+
+    // Calculate actual hash
+    let actual_hash = hex::encode(sha256_digest(data));
+
+    if &actual_hash == expected_hash {
+        info!("Checksum verification passed");
+        Ok(())
+    } else {
+        bail!(
+            "Checksum verification failed!\nExpected: {}\nGot: {}",
+            expected_hash,
+            actual_hash
+        );
+    }
+}
+
+fn sha256_digest(data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
+fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
+    // Get the current executable path
+    let current_exe = env::current_exe().context("Failed to get current executable path")?;
+    let install_dir = current_exe
+        .parent()
+        .context("Failed to get executable directory")?;
+
+    info!("Installing to {}...", install_dir.display());
+
+    // Create temporary directory
+    let temp_dir = env::temp_dir().join(format!("api-faker-update-{}", std::process::id()));
+    fs::create_dir_all(&temp_dir)?;
+
+    // Write archive to temp directory
+    let archive_path = temp_dir.join(archive_name);
+    fs::write(&archive_path, archive_data)?;
+
+    // Extract archive
+    extract_archive(&archive_path, &temp_dir)?;
+
+    // Find the binary in extracted files
+    let binary_name = if cfg!(windows) {
+        "api-faker.exe"
+    } else {
+        "api-faker"
+    };
+
+    let extracted_binary = temp_dir.join(binary_name);
+    if !extracted_binary.exists() {
+        bail!("Binary not found in archive");
+    }
+
+    // Replace current binary
+    let target_path = install_dir.join(binary_name);
+
+    // On Windows, we can't replace a running executable directly
+    // On Unix, we can replace it and the old one keeps running
+    #[cfg(unix)]
+    {
+        fs::copy(&extracted_binary, &target_path)?;
+        // Set executable permissions
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&target_path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&target_path, perms)?;
+    }
+
+    #[cfg(windows)]
+    {
+        // On Windows, rename the old binary and copy the new one
+        let backup_path = target_path.with_extension("exe.old");
+        if backup_path.exists() {
+            fs::remove_file(&backup_path)?;
+        }
+        fs::rename(&target_path, &backup_path)?;
+        fs::copy(&extracted_binary, &target_path)?;
+    }
+
+    // Clean up
+    fs::remove_dir_all(&temp_dir)?;
+
+    Ok(())
+}
+
+fn extract_archive(archive_path: &PathBuf, output_dir: &PathBuf) -> Result<()> {
+    let file = fs::File::open(archive_path)?;
+
+    if archive_path.extension().and_then(|s| s.to_str()) == Some("gz") {
+        // Handle .tar.gz
+        let decoder = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        archive.unpack(output_dir)?;
+    } else if archive_path.extension().and_then(|s| s.to_str()) == Some("zip") {
+        // Handle .zip
+        let mut archive = zip::ZipArchive::new(file)?;
+        archive.extract(output_dir)?;
+    } else {
+        bail!("Unsupported archive format");
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_version_is_newer() {
+        assert!(version_is_newer("1.2.1", "1.2.0"));
+        assert!(version_is_newer("1.3.0", "1.2.9"));
+        assert!(version_is_newer("2.0.0", "1.9.9"));
+        assert!(!version_is_newer("1.2.0", "1.2.0"));
+        assert!(!version_is_newer("1.2.0", "1.2.1"));
+        assert!(!version_is_newer("1.2.9", "1.3.0"));
+    }
+}
