@@ -47,7 +47,7 @@ struct Cli {
     dry_run: bool,
 
     /// Check for updates without installing
-    #[arg(short = 'c', long)]
+    #[arg(long)]
     check: bool,
 
     /// Update to the latest version
