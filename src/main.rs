@@ -89,7 +89,10 @@ async fn main() -> Result<()> {
                 info!("Run 'api-faker --update' to install it");
             }
             None => {
-                info!("You are running the latest version ({})", env!("CARGO_PKG_VERSION"));
+                info!(
+                    "You are running the latest version ({})",
+                    env!("CARGO_PKG_VERSION")
+                );
             }
         }
         return Ok(());

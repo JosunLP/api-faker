@@ -41,7 +41,10 @@ pub async fn check_for_updates() -> Result<Option<String>> {
         .context("Failed to fetch latest release information")?;
 
     if !response.status().is_success() {
-        bail!("GitHub API request failed with status: {}", response.status());
+        bail!(
+            "GitHub API request failed with status: {}",
+            response.status()
+        );
     }
 
     let release: GitHubRelease = response
@@ -88,21 +91,21 @@ pub async fn perform_update() -> Result<()> {
     );
 
     let response = client.get(&url).send().await?;
-    
+
     if !response.status().is_success() {
-        bail!("GitHub API request failed with status: {}", response.status());
+        bail!(
+            "GitHub API request failed with status: {}",
+            response.status()
+        );
     }
-    
+
     let release: GitHubRelease = response.json().await?;
 
     let latest_version = release.tag_name.trim_start_matches('v');
     let current_version = CURRENT_VERSION;
 
     if !version_is_newer(latest_version, current_version) {
-        info!(
-            "Already running the latest version ({})",
-            CURRENT_VERSION
-        );
+        info!("Already running the latest version ({})", CURRENT_VERSION);
         return Ok(());
     }
 
@@ -151,7 +154,10 @@ pub async fn perform_update() -> Result<()> {
     install_update(&archive_data, &archive_name)?;
 
     info!("Update completed successfully!");
-    info!("Please restart api-faker to use version {}", release.tag_name);
+    info!(
+        "Please restart api-faker to use version {}",
+        release.tag_name
+    );
 
     Ok(())
 }
@@ -268,17 +274,17 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
     {
         // On Windows, rename the old binary and copy the new one
         let backup_path = target_path.with_extension("exe.old");
-        
+
         // Remove old backup if it exists
         if backup_path.exists() {
             fs::remove_file(&backup_path)?;
         }
-        
+
         // Rename current to backup, copy new, then clean up backup
         if target_path.exists() {
             fs::rename(&target_path, &backup_path)?;
         }
-        
+
         match fs::copy(&extracted_binary, &target_path) {
             Ok(_) => {
                 // Successfully copied, remove backup
