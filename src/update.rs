@@ -99,7 +99,10 @@ pub async fn perform_update() -> Result<()> {
         );
     }
 
-    let release: GitHubRelease = response.json().await?;
+    let release: GitHubRelease = response
+        .json()
+        .await
+        .context("Failed to parse release information from GitHub API")?;
 
     let latest_version = release.tag_name.trim_start_matches('v');
     let current_version = CURRENT_VERSION;
@@ -242,6 +245,15 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
     let temp_dir = env::temp_dir().join(format!("api-faker-update-{:x}", random_suffix));
     fs::create_dir_all(&temp_dir)?;
 
+    // Ensure cleanup happens even on early returns
+    struct TempDirGuard(PathBuf);
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0); // Ignore cleanup errors
+        }
+    }
+    let _guard = TempDirGuard(temp_dir.clone());
+
     // Write archive to temp directory
     let archive_path = temp_dir.join(archive_name);
     fs::write(&archive_path, archive_data)?;
@@ -286,6 +298,9 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
             fs::remove_file(&backup_path)?;
         }
 
+        // TODO: Consider implementing cleanup of stale .exe.old files on startup
+        // to handle cases where the update process is interrupted or crashes
+
         // Rename current to backup, copy new, then clean up backup
         if target_path.exists() {
             fs::rename(&target_path, &backup_path)?;
@@ -308,9 +323,7 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
         }
     }
 
-    // Clean up
-    fs::remove_dir_all(&temp_dir)?;
-
+    // Cleanup is handled automatically by TempDirGuard
     Ok(())
 }
 

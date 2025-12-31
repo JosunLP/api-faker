@@ -143,6 +143,8 @@ Download and run the installation script:
 curl -fsSL https://raw.githubusercontent.com/JosunLP/api-faker/main/install.sh | sh
 ```
 
+> **Security note**: Only run install scripts from sources you trust. If you're unsure, use the download-and-inspect method below before executing the script.
+
 Or download and inspect first:
 ```bash
 wget https://raw.githubusercontent.com/JosunLP/api-faker/main/install.sh
