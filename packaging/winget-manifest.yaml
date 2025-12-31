@@ -8,7 +8,7 @@
 # TODO: Consider automating this with GitHub Actions
 
 PackageIdentifier: JosunLP.APIFaker
-PackageVersion: 1.2.0  # UPDATE THIS VERSION FOR EACH RELEASE
+PackageVersion: VERSION_PLACEHOLDER  # TODO: Update to actual version (e.g., 1.2.0) for each release
 PackageLocale: en-US
 Publisher: JosunLP
 PublisherUrl: https://github.com/JosunLP
@@ -48,8 +48,8 @@ ManifestVersion: 1.0.0
 Installers:
   - Architecture: x64
     InstallerType: zip
-    InstallerUrl: https://github.com/JosunLP/api-faker/releases/download/v1.2.0/api-faker-windows-x86_64.zip  # UPDATE VERSION
-    InstallerSha256: <REPLACE_WITH_ACTUAL_SHA256>  # UPDATE THIS
+    InstallerUrl: https://github.com/JosunLP/api-faker/releases/download/vVERSION_PLACEHOLDER/api-faker-windows-x86_64.zip  # TODO: Update VERSION_PLACEHOLDER
+    InstallerSha256: SHA256_HASH_PLACEHOLDER  # TODO: Replace with actual SHA256 from checksums.txt
     InstallerSwitches:
       Silent: /S
       SilentWithProgress: /S

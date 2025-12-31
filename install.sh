@@ -103,9 +103,9 @@ download_file() {
     OUTPUT="$2"
     
     if command -v curl >/dev/null 2>&1; then
-        curl -sL "$URL" -o "$OUTPUT"
+        curl -fsSL "$URL" -o "$OUTPUT" || return 1
     elif command -v wget >/dev/null 2>&1; then
-        wget -q "$URL" -O "$OUTPUT"
+        wget -q "$URL" -O "$OUTPUT" || return 1
     else
         log_error "Neither curl nor wget found"
         exit 1
@@ -117,11 +117,18 @@ download_release() {
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
     HASH_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
     
-    TMP_DIR=$(mktemp -d)
+    TMP_DIR=$(mktemp -d -t 'api-faker.XXXXXX' 2>/dev/null || mktemp -d 2>/dev/null)
+    if [ -z "$TMP_DIR" ] || [ ! -d "$TMP_DIR" ]; then
+        log_error "Failed to create temporary directory"
+        exit 1
+    fi
     trap 'rm -rf "$TMP_DIR"' EXIT
     
     log_info "Downloading $ARCHIVE_NAME..."
-    download_file "$DOWNLOAD_URL" "$TMP_DIR/$ARCHIVE_NAME"
+    if ! download_file "$DOWNLOAD_URL" "$TMP_DIR/$ARCHIVE_NAME"; then
+        log_error "Failed to download $ARCHIVE_NAME"
+        exit 1
+    fi
     
     # Download and verify checksums if available
     log_info "Downloading checksums..."
@@ -203,7 +210,8 @@ install_binary() {
         else
             log_error "Cannot write to $INSTALL_DIR and sudo not available"
             log_info "Try setting INSTALL_DIR to a writable location:"
-            log_info "  INSTALL_DIR=~/.local/bin $0"
+            log_info "  export INSTALL_DIR=~/.local/bin"
+            log_info "  Then run the install script again"
             exit 1
         fi
     else

@@ -56,7 +56,7 @@ pub async fn check_for_updates() -> Result<Option<String>> {
     let current_version = CURRENT_VERSION;
 
     if version_is_newer(latest_version, current_version) {
-        Ok(Some(release.tag_name))
+        Ok(Some(latest_version.to_string()))
     } else {
         Ok(None)
     }
@@ -200,7 +200,7 @@ fn verify_checksum(data: &[u8], checksums: &str, filename: &str) -> Result<()> {
     // Calculate actual hash
     let actual_hash = hex::encode(sha256_digest(data));
 
-    if &actual_hash == expected_hash {
+    if actual_hash == *expected_hash {
         info!("Checksum verification passed");
         Ok(())
     } else {
@@ -228,12 +228,18 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
 
     info!("Installing to {}...", install_dir.display());
 
-    // Create temporary directory with random component for security
-    let random_suffix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temp_dir = env::temp_dir().join(format!("api-faker-update-{}", random_suffix));
+    // Create temporary directory with UUID for security
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hash, Hasher};
+    let random_suffix = {
+        let state = RandomState::new();
+        let mut hasher = state.build_hasher();
+        std::time::SystemTime::now().hash(&mut hasher);
+        std::process::id().hash(&mut hasher);
+        std::thread::current().id().hash(&mut hasher);
+        hasher.finish()
+    };
+    let temp_dir = env::temp_dir().join(format!("api-faker-update-{:x}", random_suffix));
     fs::create_dir_all(&temp_dir)?;
 
     // Write archive to temp directory
@@ -343,5 +349,54 @@ mod tests {
         assert!(!version_is_newer("1.2.0", "1.2.0"));
         assert!(!version_is_newer("1.2.0", "1.2.1"));
         assert!(!version_is_newer("1.2.9", "1.3.0"));
+    }
+
+    #[test]
+    fn test_get_platform_archive_name() {
+        // Test that the function returns a valid archive name
+        let result = get_platform_archive_name();
+        assert!(result.is_ok());
+
+        let archive_name = result.unwrap();
+
+        // Should contain platform and architecture
+        assert!(archive_name.contains("x86_64"));
+        assert!(
+            archive_name.contains("linux")
+                || archive_name.contains("macos")
+                || archive_name.contains("windows")
+        );
+
+        // Should have correct extension
+        assert!(archive_name.ends_with(".tar.gz") || archive_name.ends_with(".zip"));
+    }
+
+    #[test]
+    fn test_verify_checksum_valid() {
+        let data = b"test data";
+        let hash = hex::encode(sha256_digest(data));
+        let checksums = format!("{}  test.tar.gz\n", hash);
+
+        let result = verify_checksum(data, &checksums, "test.tar.gz");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_checksum_invalid() {
+        let data = b"test data";
+        let checksums = "deadbeef  test.tar.gz\n";
+
+        let result = verify_checksum(data, checksums, "test.tar.gz");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_checksum_missing_file() {
+        let data = b"test data";
+        let hash = hex::encode(sha256_digest(data));
+        let checksums = format!("{}  other.tar.gz\n", hash);
+
+        let result = verify_checksum(data, &checksums, "test.tar.gz");
+        assert!(result.is_err());
     }
 }

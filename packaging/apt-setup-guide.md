@@ -114,10 +114,19 @@ gzip -k Packages
 
 4. Users add your repository:
 ```bash
-echo "deb [trusted=yes] https://josunlp.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+# Note: This example uses [trusted=yes] for simplicity but is NOT RECOMMENDED for production
+# For production use, properly sign your repository with GPG (see "GPG Signing" section below)
+echo "deb https://josunlp.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+
+# If you haven't set up GPG signing, you'll need to add [trusted=yes]
+# WARNING: This disables signature verification and should only be used for testing
+# echo "deb [trusted=yes] https://josunlp.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+
 sudo apt update
 sudo apt install api-faker
 ```
+
+**Security Note**: Always use proper GPG signing for production repositories (see "GPG Signing" section below). The `[trusted=yes]` option disables signature verification and should only be used for testing purposes.
 
 ### Option 3: Using Packagecloud or Gemfury (Hosted)
 

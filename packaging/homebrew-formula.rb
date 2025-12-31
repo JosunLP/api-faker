@@ -15,15 +15,15 @@
 class ApiFaker < Formula
   desc "Lightweight Rust application that serves HTTP endpoints from a JSON configuration file"
   homepage "https://github.com/JosunLP/api-faker"
-  version "1.2.0"  # UPDATE THIS VERSION FOR EACH RELEASE
+  version "VERSION_PLACEHOLDER"  # TODO: Update to actual version (e.g., 1.2.0) for each release
   license "MIT"
 
   if OS.mac?
-    url "https://github.com/JosunLP/api-faker/releases/download/v1.2.0/api-faker-macos-x86_64.tar.gz"  # UPDATE VERSION
-    sha256 "<REPLACE_WITH_ACTUAL_SHA256>"  # UPDATE THIS
+    url "https://github.com/JosunLP/api-faker/releases/download/vVERSION_PLACEHOLDER/api-faker-macos-x86_64.tar.gz"  # TODO: Update VERSION_PLACEHOLDER
+    sha256 "SHA256_HASH_PLACEHOLDER"  # TODO: Replace with actual SHA256 from checksums.txt
   elsif OS.linux?
-    url "https://github.com/JosunLP/api-faker/releases/download/v1.2.0/api-faker-linux-x86_64.tar.gz"  # UPDATE VERSION
-    sha256 "<REPLACE_WITH_ACTUAL_SHA256>"  # UPDATE THIS
+    url "https://github.com/JosunLP/api-faker/releases/download/vVERSION_PLACEHOLDER/api-faker-linux-x86_64.tar.gz"  # TODO: Update VERSION_PLACEHOLDER
+    sha256 "SHA256_HASH_PLACEHOLDER"  # TODO: Replace with actual SHA256 from checksums.txt
   end
 
   def install

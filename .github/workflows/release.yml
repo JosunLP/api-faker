@@ -94,13 +94,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
-          merge-multiple: true
 
       - name: Merge checksums
         run: |
           cd dist
-          cat *-checksums/checksums.txt > checksums.txt 2>/dev/null || echo "No checksums found"
-          rm -rf *-checksums
+          # Merge all checksums.txt files from artifact subdirectories
+          find . -name "checksums.txt" -exec cat {} \; > checksums.txt
+          # Remove artifact subdirectories
+          find . -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} \;
           echo "Final checksums:"
           cat checksums.txt
 
