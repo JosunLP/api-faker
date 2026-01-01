@@ -102,6 +102,8 @@ jobs:
           cd dist
           # Merge all checksums.txt files from artifact subdirectories
           find . -name "checksums.txt" -exec cat {} \; > checksums.txt
+          # Move binary archives (tar.gz/zip) from artifact subdirectories to dist root
+          find . -mindepth 2 -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} . \;
           # Remove artifact subdirectories
           find . -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} \;
           echo "Final checksums:"
@@ -122,6 +124,16 @@ jobs:
           LINUX_HASH=$(grep "api-faker-linux-x86_64.tar.gz" dist/checksums.txt | awk '{print $1}')
           MACOS_HASH=$(grep "api-faker-macos-x86_64.tar.gz" dist/checksums.txt | awk '{print $1}')
           WINDOWS_HASH=$(grep "api-faker-windows-x86_64.zip" dist/checksums.txt | awk '{print $1}')
+
+          # Validate that all hashes were found
+          if [ -z "$LINUX_HASH" ] || [ -z "$MACOS_HASH" ] || [ -z "$WINDOWS_HASH" ]; then
+            echo "Error: One or more required hashes could not be extracted from dist/checksums.txt." >&2
+            echo "  LINUX_HASH:   '${LINUX_HASH}'" >&2
+            echo "  MACOS_HASH:   '${MACOS_HASH}'" >&2
+            echo "  WINDOWS_HASH: '${WINDOWS_HASH}'" >&2
+            echo "Please ensure dist/checksums.txt contains entries for all expected artifacts." >&2
+            exit 1
+          fi
 
           echo "Linux hash: $LINUX_HASH"
           echo "macOS hash: $MACOS_HASH"
@@ -188,18 +200,18 @@ jobs:
 
           # Create control file
           cat > "${PKG_DIR}/DEBIAN/control" << EOF
-          Package: api-faker
-          Version: ${VERSION}
-          Section: utils
-          Priority: optional
-          Architecture: amd64
-          Maintainer: JosunLP <github@josunlp.de>
-          Homepage: https://github.com/JosunLP/api-faker
-          Description: Lightweight Rust application for serving mock HTTP endpoints
-           API Faker is a lightweight Rust application that serves HTTP endpoints
-           from a JSON configuration file. It is ideal for frontend or integration
-           work whenever the real backend is still under construction.
-          EOF
+Package: api-faker
+Version: ${VERSION}
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: JosunLP <github@josunlp.de>
+Homepage: https://github.com/JosunLP/api-faker
+Description: Lightweight Rust application for serving mock HTTP endpoints
+ API Faker is a lightweight Rust application that serves HTTP endpoints
+ from a JSON configuration file. It is ideal for frontend or integration
+ work whenever the real backend is still under construction.
+EOF
 
           # Build .deb package
           dpkg-deb --build "${PKG_DIR}"
@@ -275,12 +287,17 @@ jobs:
               -e "s/SHA256_LINUX_PLACEHOLDER/$LINUX_HASH/g" \
               packaging/homebrew-formula.rb > api-faker.rb
 
+      - name: Prepare Homebrew formula directory
+        run: |
+          mkdir -p homebrew-formula
+          mv api-faker.rb homebrew-formula/
+
       - name: Push to Homebrew Tap
         uses: cpina/github-action-push-to-another-repository@v1.7.2
         env:
           SSH_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         with:
-          source-directory: "."
+          source-directory: "homebrew-formula"
           destination-github-username: "JosunLP"
           destination-repository-name: "homebrew-tap"
           target-branch: main

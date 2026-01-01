@@ -192,8 +192,9 @@ sudo apt install api-faker
 Or download the `.deb` package directly from the [releases page](https://github.com/JosunLP/api-faker/releases):
 
 ```bash
-curl -LO https://github.com/JosunLP/api-faker/releases/latest/download/api-faker_1.2.0_amd64.deb
-sudo dpkg -i api-faker_1.2.0_amd64.deb
+# Replace VERSION with the actual version number from the releases page
+curl -LO https://github.com/JosunLP/api-faker/releases/latest/download/api-faker_VERSION_amd64.deb
+sudo dpkg -i api-faker_VERSION_amd64.deb
 ```
 
 #### Manual Installation

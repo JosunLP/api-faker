@@ -198,12 +198,13 @@ fn verify_checksum(data: &[u8], checksums: &str, filename: &str) -> Result<()> {
 
     let expected_hash = checksums_map
         .get(filename)
-        .context(format!("Checksum not found for {}", filename))?;
+        .context(format!("Checksum not found for {}", filename))?
+        .to_ascii_lowercase();
 
     // Calculate actual hash
-    let actual_hash = hex::encode(sha256_digest(data));
+    let actual_hash = hex::encode(sha256_digest(data)).to_ascii_lowercase();
 
-    if actual_hash == *expected_hash {
+    if actual_hash == expected_hash {
         info!("Checksum verification passed");
         Ok(())
     } else {
