@@ -154,7 +154,11 @@ download_release() {
             fi
             
             if [ -n "$ACTUAL_HASH" ]; then
-                if [ "$EXPECTED_HASH" = "$ACTUAL_HASH" ]; then
+                # Normalize both hashes to lowercase for case-insensitive comparison
+                EXPECTED_HASH_LOWER=$(printf '%s' "$EXPECTED_HASH" | tr 'A-F' 'a-f')
+                ACTUAL_HASH_LOWER=$(printf '%s' "$ACTUAL_HASH" | tr 'A-F' 'a-f')
+                
+                if [ "$EXPECTED_HASH_LOWER" = "$ACTUAL_HASH_LOWER" ]; then
                     log_info "Checksum verification passed"
                 else
                     log_error "Checksum verification failed!"

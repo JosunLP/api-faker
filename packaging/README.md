@@ -127,11 +127,20 @@ To enable automatic publishing to package managers, configure the following repo
 Users can then install with:
 
 ```bash
-# Add repository (uses trusted=yes for simplicity)
-echo "deb [trusted=yes] https://josunlp.github.io/api-faker stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+# PRODUCTION: Use properly signed repository with GPG key
+# First, add the repository GPG key (see apt-setup-guide.md for details)
+# curl -fsSL https://josunlp.github.io/api-faker/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/api-faker.gpg
+# echo "deb [signed-by=/usr/share/keyrings/api-faker.gpg] https://josunlp.github.io/api-faker stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+
+# TESTING ONLY (NOT SECURE): For local testing without GPG setup
+# WARNING: This disables signature verification - see packaging/apt-setup-guide.md
+# echo "deb [trusted=yes] https://josunlp.github.io/api-faker stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+
 sudo apt update
 sudo apt install api-faker
 ```
+
+⚠️ **Important**: The `[trusted=yes]` option disables APT's security features. For production use, set up proper GPG signing as documented in `packaging/apt-setup-guide.md`.
 
 ### Manual publishing (fallback)
 

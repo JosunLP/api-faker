@@ -106,6 +106,14 @@ jobs:
           find . -mindepth 2 -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} . \;
           # Remove artifact subdirectories
           find . -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} \;
+          
+          # Validate that no unexpected directories remain
+          REMAINING_DIRS=$(find . -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)
+          if [ -n "$REMAINING_DIRS" ]; then
+            echo "Warning: Unexpected directories remain in dist after artifact processing:" >&2
+            echo "$REMAINING_DIRS" >&2
+          fi
+          
           echo "Final checksums:"
           cat checksums.txt
 

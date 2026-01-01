@@ -89,6 +89,8 @@ sudo dpkg -i api-faker_1.2.0_amd64.deb
 
 ### Option 2: GitHub Pages Repository (Recommended)
 
+> ⚠️ **SECURITY WARNING**: The instructions below include an example using `[trusted=yes]` which disables APT's GPG signature verification. This is **NOT SECURE** for production use and should only be used for local testing. For production deployments, you **MUST** implement proper GPG signing as described in the "GPG Signing" section below to ensure package integrity and authenticity.
+
 1. Create a new repository for your APT repository
 2. Set up the structure:
 
@@ -122,19 +124,17 @@ gzip -k Packages
 1. Users add your repository:
 
 ```bash
-# Note: This example uses [trusted=yes] for simplicity but is NOT RECOMMENDED for production
-# For production use, properly sign your repository with GPG (see "GPG Signing" section below)
-echo "deb https://josunlp.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+# PRODUCTION: Use properly signed repository (see "GPG Signing" section below)
+echo "deb [signed-by=/usr/share/keyrings/api-faker.gpg] https://josunlp.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
 
-# If you haven't set up GPG signing, you'll need to add [trusted=yes]
-# WARNING: This disables signature verification and should only be used for testing
+# TESTING ONLY: If you haven't set up GPG signing (NOT SECURE - see warning above)
 # echo "deb [trusted=yes] https://josunlp.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
 
 sudo apt update
 sudo apt install api-faker
 ```
 
-**Security Note**: Always use proper GPG signing for production repositories (see "GPG Signing" section below). The `[trusted=yes]` option disables signature verification and should only be used for testing purposes.
+**Security Note**: The `[trusted=yes]` option disables all cryptographic verification. An attacker who compromises your GitHub Pages or performs a network MITM attack could deliver malicious `.deb` packages that will be installed with root privileges. Always use proper GPG signing for any repository accessed by multiple users or production systems.
 
 ### Option 3: Using Packagecloud or Gemfury (Hosted)
 

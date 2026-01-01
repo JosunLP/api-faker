@@ -244,6 +244,11 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
         hasher.finish()
     };
     let temp_dir = env::temp_dir().join(format!("api-faker-update-{:x}", random_suffix));
+
+    // Create directory, handling unlikely case where it already exists
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)?;
+    }
     fs::create_dir_all(&temp_dir)?;
 
     // Ensure cleanup happens even on early returns
@@ -300,7 +305,10 @@ fn install_update(archive_data: &[u8], archive_name: &str) -> Result<()> {
         }
 
         // TODO: Consider implementing cleanup of stale .exe.old files on startup
-        // to handle cases where the update process is interrupted or crashes
+        // to handle cases where the update process is interrupted or crashes.
+        // Strategy: On application startup, check for .exe.old files in the
+        // installation directory and remove them if they're older than a threshold
+        // (e.g., 24 hours) to prevent disk space accumulation over many updates.
 
         // Rename current to backup, copy new, then clean up backup
         if target_path.exists() {

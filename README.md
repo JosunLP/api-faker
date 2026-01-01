@@ -180,13 +180,13 @@ winget install JosunLP.APIFaker
 
 **APT (Debian/Ubuntu):**
 
-```bash
-# Add repository
-echo "deb [trusted=yes] https://josunlp.github.io/api-faker stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+> ⚠️ **Note**: The example below shows setup for testing. For production use, implement proper GPG signing as documented in `packaging/apt-setup-guide.md`.
 
-# Install
-sudo apt update
-sudo apt install api-faker
+```bash
+# TESTING ONLY - For production, use signed repository (see packaging/apt-setup-guide.md)
+# echo "deb [trusted=yes] https://josunlp.github.io/api-faker stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+# sudo apt update
+# sudo apt install api-faker
 ```
 
 Or download the `.deb` package directly from the [releases page](https://github.com/JosunLP/api-faker/releases):
