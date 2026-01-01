@@ -9,21 +9,21 @@
 # 2. Add this formula to Formula/api-faker.rb
 # 3. Users install with: brew install josunlp/tap/api-faker
 #
-# NOTE: Update version, url, and sha256 for each release
-# TODO: Consider automating this with GitHub Actions
+# NOTE: This file is automatically updated during the release process.
+# See .github/workflows/release.yml for automation details.
 
 class ApiFaker < Formula
   desc "Lightweight Rust application that serves HTTP endpoints from a JSON configuration file"
   homepage "https://github.com/JosunLP/api-faker"
-  version "VERSION_PLACEHOLDER"  # TODO: Update to actual version (e.g., 1.2.0) for each release
+  version "VERSION_PLACEHOLDER"
   license "MIT"
 
   if OS.mac?
-    url "https://github.com/JosunLP/api-faker/releases/download/vVERSION_PLACEHOLDER/api-faker-macos-x86_64.tar.gz"  # TODO: Update VERSION_PLACEHOLDER
-    sha256 "SHA256_HASH_PLACEHOLDER"  # TODO: Replace with actual SHA256 from checksums.txt
+    url "https://github.com/JosunLP/api-faker/releases/download/vVERSION_PLACEHOLDER/api-faker-macos-x86_64.tar.gz"
+    sha256 "SHA256_MACOS_PLACEHOLDER"
   elsif OS.linux?
-    url "https://github.com/JosunLP/api-faker/releases/download/vVERSION_PLACEHOLDER/api-faker-linux-x86_64.tar.gz"  # TODO: Update VERSION_PLACEHOLDER
-    sha256 "SHA256_HASH_PLACEHOLDER"  # TODO: Replace with actual SHA256 from checksums.txt
+    url "https://github.com/JosunLP/api-faker/releases/download/vVERSION_PLACEHOLDER/api-faker-linux-x86_64.tar.gz"
+    sha256 "SHA256_LINUX_PLACEHOLDER"
   end
 
   def install

@@ -2,6 +2,8 @@ name: Release
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 on:
   push:
@@ -108,6 +110,43 @@ jobs:
       - name: Copy install script to dist
         run: cp install.sh dist/
 
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Generate package manager manifests
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Read checksums
+          LINUX_HASH=$(grep "api-faker-linux-x86_64.tar.gz" dist/checksums.txt | awk '{print $1}')
+          MACOS_HASH=$(grep "api-faker-macos-x86_64.tar.gz" dist/checksums.txt | awk '{print $1}')
+          WINDOWS_HASH=$(grep "api-faker-windows-x86_64.zip" dist/checksums.txt | awk '{print $1}')
+
+          echo "Linux hash: $LINUX_HASH"
+          echo "macOS hash: $MACOS_HASH"
+          echo "Windows hash: $WINDOWS_HASH"
+
+          # Generate Winget manifest
+          sed -e "s/VERSION_PLACEHOLDER/$VERSION/g" \
+              -e "s/SHA256_HASH_PLACEHOLDER/$WINDOWS_HASH/g" \
+              packaging/winget-manifest.yaml > dist/winget-manifest.yaml
+
+          # Generate Homebrew formula
+          sed -e "s/VERSION_PLACEHOLDER/$VERSION/g" \
+              -e "s/SHA256_MACOS_PLACEHOLDER/$MACOS_HASH/g" \
+              -e "s/SHA256_LINUX_PLACEHOLDER/$LINUX_HASH/g" \
+              packaging/homebrew-formula.rb > dist/homebrew-formula.rb
+
+          echo "Generated package manifests:"
+          ls -la dist/*.yaml dist/*.rb
+          echo ""
+          echo "=== Winget manifest ==="
+          cat dist/winget-manifest.yaml
+          echo ""
+          echo "=== Homebrew formula ==="
+          cat dist/homebrew-formula.rb
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -115,3 +154,309 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-deb:
+    name: Build Debian package
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: api-faker-linux-x86_64
+          path: artifacts
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build .deb package
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Create package directory structure
+          PKG_DIR="api-faker_${VERSION}_amd64"
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/usr/local/bin"
+
+          # Extract binary from archive
+          tar -xzf artifacts/api-faker-linux-x86_64.tar.gz -C "${PKG_DIR}/usr/local/bin/"
+          chmod 755 "${PKG_DIR}/usr/local/bin/api-faker"
+
+          # Create control file
+          cat > "${PKG_DIR}/DEBIAN/control" << EOF
+          Package: api-faker
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: JosunLP <github@josunlp.de>
+          Homepage: https://github.com/JosunLP/api-faker
+          Description: Lightweight Rust application for serving mock HTTP endpoints
+           API Faker is a lightweight Rust application that serves HTTP endpoints
+           from a JSON configuration file. It is ideal for frontend or integration
+           work whenever the real backend is still under construction.
+          EOF
+
+          # Build .deb package
+          dpkg-deb --build "${PKG_DIR}"
+
+          # Generate checksum for .deb
+          sha256sum "${PKG_DIR}.deb" > "${PKG_DIR}.deb.sha256"
+
+          echo "Built package:"
+          ls -la *.deb *.sha256
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-faker-deb
+          path: |
+            *.deb
+            *.sha256
+
+  publish-deb:
+    name: Add Debian package to Release
+    runs-on: ubuntu-latest
+    needs: [publish, build-deb]
+    steps:
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: api-faker-deb
+          path: deb-dist
+
+      - name: Upload .deb to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: deb-dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # Publish to Homebrew Tap
+  # ============================================================================
+  publish-homebrew:
+    name: Publish to Homebrew Tap
+    runs-on: ubuntu-latest
+    needs: publish
+    # Only run if HOMEBREW_TAP_TOKEN secret is configured
+    if: ${{ vars.ENABLE_HOMEBREW_PUBLISH == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Merge checksums
+        run: |
+          cd dist
+          find . -name "checksums.txt" -exec cat {} \; > checksums.txt
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Generate Homebrew formula
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          LINUX_HASH=$(grep "api-faker-linux-x86_64.tar.gz" dist/checksums.txt | awk '{print $1}')
+          MACOS_HASH=$(grep "api-faker-macos-x86_64.tar.gz" dist/checksums.txt | awk '{print $1}')
+
+          sed -e "s/VERSION_PLACEHOLDER/$VERSION/g" \
+              -e "s/SHA256_MACOS_PLACEHOLDER/$MACOS_HASH/g" \
+              -e "s/SHA256_LINUX_PLACEHOLDER/$LINUX_HASH/g" \
+              packaging/homebrew-formula.rb > api-faker.rb
+
+      - name: Push to Homebrew Tap
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        with:
+          source-directory: "."
+          destination-github-username: "JosunLP"
+          destination-repository-name: "homebrew-tap"
+          target-branch: main
+          target-directory: Formula
+          commit-message: "Update api-faker to ${{ steps.version.outputs.VERSION }}"
+          user-name: github-actions[bot]
+          user-email: github-actions[bot]@users.noreply.github.com
+
+  # ============================================================================
+  # Publish to Winget
+  # ============================================================================
+  publish-winget:
+    name: Publish to Winget
+    runs-on: windows-latest
+    needs: publish
+    # Only run if WINGET_TOKEN secret is configured
+    if: ${{ vars.ENABLE_WINGET_PUBLISH == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: api-faker-windows-x86_64
+          path: artifacts
+
+      - name: Download checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: api-faker-windows-x86_64-checksums
+          path: checksums
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Install wingetcreate
+        shell: powershell
+        run: |
+          iwr https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+      - name: Submit to Winget
+        shell: powershell
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          $installerUrl = "https://github.com/JosunLP/api-faker/releases/download/v$env:VERSION/api-faker-windows-x86_64.zip"
+
+          .\wingetcreate.exe update JosunLP.APIFaker `
+            --version $env:VERSION `
+            --urls $installerUrl `
+            --submit `
+            --token $env:WINGET_TOKEN
+
+  # ============================================================================
+  # Publish APT Repository to GitHub Pages
+  # ============================================================================
+  publish-apt-repo:
+    name: Publish APT Repository
+    runs-on: ubuntu-latest
+    needs: [publish, build-deb]
+    # Only run if APT publishing is enabled
+    if: ${{ vars.ENABLE_APT_PUBLISH == 'true' }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: api-faker-deb
+          path: deb-packages
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Setup APT repository structure
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Create repository structure
+          mkdir -p apt-repo/pool/main/a/api-faker
+          mkdir -p apt-repo/dists/stable/main/binary-amd64
+
+          # Copy .deb package
+          cp deb-packages/*.deb apt-repo/pool/main/a/api-faker/
+
+          # Generate Packages file
+          cd apt-repo
+          dpkg-scanpackages --arch amd64 pool/ > dists/stable/main/binary-amd64/Packages
+          gzip -k dists/stable/main/binary-amd64/Packages
+
+          # Generate Release file
+          cd dists/stable
+          cat > Release << EOF
+          Origin: JosunLP
+          Label: API Faker
+          Suite: stable
+          Codename: stable
+          Version: ${VERSION}
+          Architectures: amd64
+          Components: main
+          Description: API Faker APT Repository
+          Date: $(date -Ru)
+          EOF
+
+          # Add checksums to Release file
+          echo "MD5Sum:" >> Release
+          for file in main/binary-amd64/Packages main/binary-amd64/Packages.gz; do
+            if [ -f "$file" ]; then
+              echo " $(md5sum "$file" | cut -d' ' -f1) $(wc -c < "$file") $file" >> Release
+            fi
+          done
+
+          echo "SHA256:" >> Release
+          for file in main/binary-amd64/Packages main/binary-amd64/Packages.gz; do
+            if [ -f "$file" ]; then
+              echo " $(sha256sum "$file" | cut -d' ' -f1) $(wc -c < "$file") $file" >> Release
+            fi
+          done
+
+          cd ../..
+
+          # Create index.html with installation instructions
+          cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>API Faker APT Repository</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+              pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+              code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+            </style>
+          </head>
+          <body>
+            <h1>🚀 API Faker APT Repository</h1>
+            <p>This is the official APT repository for <a href="https://github.com/JosunLP/api-faker">API Faker</a>.</p>
+
+            <h2>Installation</h2>
+            <pre><code># Add the repository (unsigned - for testing only)
+          echo "deb [trusted=yes] https://josunlp.github.io/api-faker stable main" | sudo tee /etc/apt/sources.list.d/api-faker.list
+
+          # Update and install
+          sudo apt update
+          sudo apt install api-faker</code></pre>
+
+            <h2>⚠️ Security Note</h2>
+            <p>This repository uses <code>[trusted=yes]</code> which disables GPG signature verification.
+            For production environments, consider using the direct download method or building from source.</p>
+
+            <h2>Alternative: Direct Download</h2>
+            <p>You can also download .deb packages directly from the
+            <a href="https://github.com/JosunLP/api-faker/releases">GitHub Releases</a> page.</p>
+          </body>
+          </html>
+          EOF
+
+          echo "APT repository structure:"
+          find . -type f | head -20
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apt-repo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

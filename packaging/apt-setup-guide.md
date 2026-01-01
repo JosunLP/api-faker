@@ -5,6 +5,7 @@ This document describes how to prepare API Faker for distribution via APT (Debia
 ## Overview
 
 To distribute via APT, you need to:
+
 1. Create `.deb` packages for each release
 2. Host a Debian repository (can be GitHub Pages or any web server)
 3. Sign packages with GPG key
@@ -12,6 +13,7 @@ To distribute via APT, you need to:
 ## Creating .deb Packages
 
 ### Prerequisites
+
 ```bash
 sudo apt-get install build-essential devscripts debhelper
 ```
@@ -19,7 +21,8 @@ sudo apt-get install build-essential devscripts debhelper
 ### Debian Package Structure
 
 A `.deb` package needs:
-```
+
+```bash
 api-faker_1.2.0_amd64/
 ├── DEBIAN/
 │   └── control
@@ -30,7 +33,8 @@ api-faker_1.2.0_amd64/
 ```
 
 ### DEBIAN/control file
-```
+
+```bash
 Package: api-faker
 Version: 1.2.0
 Section: utils
@@ -77,6 +81,7 @@ dpkg-deb --build api-faker_1.2.0_amd64
 ### Option 1: Using GitHub Releases (Simple)
 
 Users can download `.deb` files directly from GitHub releases:
+
 ```bash
 wget https://github.com/JosunLP/api-faker/releases/download/v1.2.0/api-faker_1.2.0_amd64.deb
 sudo dpkg -i api-faker_1.2.0_amd64.deb
@@ -86,7 +91,8 @@ sudo dpkg -i api-faker_1.2.0_amd64.deb
 
 1. Create a new repository for your APT repository
 2. Set up the structure:
-```
+
+```bash
 apt-repo/
 ├── dists/
 │   └── stable/
@@ -101,7 +107,8 @@ apt-repo/
                 └── api-faker_1.2.0_amd64.deb
 ```
 
-3. Generate repository metadata:
+1. Generate repository metadata:
+
 ```bash
 # Install required tools
 sudo apt-get install dpkg-dev
@@ -112,7 +119,8 @@ dpkg-scanpackages ../../../../pool/main > Packages
 gzip -k Packages
 ```
 
-4. Users add your repository:
+1. Users add your repository:
+
 ```bash
 # Note: This example uses [trusted=yes] for simplicity but is NOT RECOMMENDED for production
 # For production use, properly sign your repository with GPG (see "GPG Signing" section below)
@@ -141,10 +149,10 @@ Consider adding a GitHub Action to automatically build `.deb` packages on releas
   run: |
     mkdir -p package/DEBIAN
     mkdir -p package/usr/local/bin
-    
+
     cp target/release/api-faker package/usr/local/bin/
     chmod 755 package/usr/local/bin/api-faker
-    
+
     cat > package/DEBIAN/control << 'EOF'
     Package: api-faker
     Version: ${{ github.ref_name }}
@@ -154,7 +162,7 @@ Consider adding a GitHub Action to automatically build `.deb` packages on releas
     Maintainer: JosunLP <your-email@example.com>
     Description: Lightweight Rust application for serving mock HTTP endpoints
     EOF
-    
+
     dpkg-deb --build package
     mv package.deb api-faker_${{ github.ref_name }}_amd64.deb
 ```
