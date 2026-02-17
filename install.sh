@@ -5,10 +5,17 @@
 set -e
 
 # Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    NC=''
+fi
 
 # Configuration
 REPO="JosunLP/api-faker"
@@ -114,6 +121,17 @@ download_file() {
 
 # Download and verify release
 download_release() {
+    # Validate VERSION format (expecting tags like v1.2.3)
+    case "$VERSION" in
+        v[0-9]*.[0-9]*.[0-9]*)
+            # Looks like a semantic version tag; continue
+            ;;
+        *)
+            log_error "Invalid version tag: $VERSION"
+            exit 1
+            ;;
+    esac
+    
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
     HASH_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
     
@@ -137,12 +155,22 @@ download_release() {
         
         cd "$TMP_DIR"
         
-        # Extract the hash for our specific file
-        EXPECTED_HASH=$(grep "$ARCHIVE_NAME" checksums.txt | awk '{print $1}')
-        
-        if [ -z "$EXPECTED_HASH" ]; then
+        # Extract and validate the hash for our specific file
+        MATCHING_LINES=$(grep -F "$ARCHIVE_NAME" checksums.txt 2>/dev/null || true)
+        LINE_COUNT=$(printf '%s\n' "$MATCHING_LINES" | sed '/^$/d' | wc -l | tr -d '[:space:]')
+
+        if [ "$LINE_COUNT" -eq 0 ] || [ -z "$MATCHING_LINES" ]; then
             log_warn "No checksum found for $ARCHIVE_NAME, skipping verification"
+        elif [ "$LINE_COUNT" -gt 1 ]; then
+            log_error "Multiple checksum entries found for $ARCHIVE_NAME, aborting verification"
+            exit 1
         else
+            EXPECTED_HASH=$(printf '%s\n' "$MATCHING_LINES" | awk '{print $1}')
+            # Validate that the expected hash is a proper SHA256 (64 hex characters)
+            if ! printf '%s\n' "$EXPECTED_HASH" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+                log_error "Invalid checksum format for $ARCHIVE_NAME in checksums.txt"
+                exit 1
+            fi
             # Calculate actual hash
             if command -v sha256sum >/dev/null 2>&1; then
                 ACTUAL_HASH=$(sha256sum "$ARCHIVE_NAME" | awk '{print $1}')

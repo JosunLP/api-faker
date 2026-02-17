@@ -116,6 +116,18 @@ jobs:
           
           echo "Final checksums:"
           cat checksums.txt
+          
+          # Validate that all expected artifacts have checksums
+          EXPECTED_FILES="api-faker-linux-x86_64.tar.gz api-faker-macos-x86_64.tar.gz api-faker-windows-x86_64.zip"
+          for file in $EXPECTED_FILES; do
+            if ! grep -q "$file" checksums.txt; then
+              echo "Error: Missing checksum for expected artifact: $file" >&2
+              echo "Checksums file contents:" >&2
+              cat checksums.txt >&2
+              exit 1
+            fi
+          done
+          echo "All expected artifact checksums present"
 
       - name: Copy install script to dist
         run: cp install.sh dist/

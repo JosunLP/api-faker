@@ -7,6 +7,10 @@ use tracing::{info, warn};
 
 const REPO_OWNER: &str = "JosunLP";
 const REPO_NAME: &str = "api-faker";
+// Version from Cargo.toml at compile time
+// Note: When building from a commit ahead of the latest tagged release (e.g., from main branch),
+// the version might match the latest release tag even though the binary may contain unreleased changes.
+// This is a known limitation of compile-time version checking.
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Deserialize)]
