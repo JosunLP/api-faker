@@ -9,6 +9,7 @@ use tracing_subscriber::EnvFilter;
 mod config;
 mod runtime;
 mod server;
+mod update;
 
 use crate::config::Config;
 use crate::server::{AppState, build_router};
@@ -44,6 +45,14 @@ struct Cli {
     /// Validate the configuration and exit without starting the server
     #[arg(long)]
     dry_run: bool,
+
+    /// Check for updates without installing
+    #[arg(long)]
+    check: bool,
+
+    /// Update to the latest version
+    #[arg(long)]
+    update: bool,
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -71,6 +80,27 @@ impl LogLevel {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log_level.as_ref());
+
+    // Handle update commands first
+    if cli.check {
+        match update::check_for_updates().await? {
+            Some(new_version) => {
+                info!("New version available: {}", new_version);
+                info!("Run 'api-faker --update' to install it");
+            }
+            None => {
+                info!(
+                    "You are running the latest version ({})",
+                    env!("CARGO_PKG_VERSION")
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    if cli.update {
+        return update::perform_update().await;
+    }
 
     let config = Config::from_file(&cli.config).await?;
     let route_count = config.routes.len();
